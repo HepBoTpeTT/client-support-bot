@@ -1,0 +1,6 @@
+flask
+openai
+beautifulsoup4
+requests
+sentence-transformers
+python-dotenv
