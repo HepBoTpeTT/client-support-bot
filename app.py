@@ -6,10 +6,7 @@ from openai_helper import ask_gpt
 import config
 
 app = Flask(__name__, template_folder='templates')
-
-@app.before_first_request
-def setup():
-    init_db()
+init_db()
 
 @app.route('/')
 def index():
