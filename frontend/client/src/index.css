@@ -1,0 +1,115 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ── Light theme (default) ── */
+    --background: 210 20% 98%;
+    --foreground: 220 20% 14%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 14%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 14%;
+
+    --primary: 183 90% 28%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 20% 94%;
+    --secondary-foreground: 220 16% 30%;
+
+    --muted: 210 18% 94%;
+    --muted-foreground: 220 12% 46%;
+
+    --accent: 183 70% 24%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 65% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 16% 88%;
+    --input: 210 16% 88%;
+    --ring: 183 90% 28%;
+
+    --radius: 0.5rem;
+
+    /* Sidebar — light */
+    --sidebar-background: 210 22% 96%;
+    --sidebar-foreground: 220 18% 28%;
+    --sidebar-primary: 183 90% 28%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 183 40% 90%;
+    --sidebar-accent-foreground: 183 80% 22%;
+    --sidebar-border: 210 16% 86%;
+    --sidebar-ring: 183 90% 28%;
+  }
+
+  .dark {
+    /* ── Dark theme ── */
+    --background: 222 25% 9%;
+    --foreground: 210 20% 90%;
+
+    --card: 222 22% 12%;
+    --card-foreground: 210 20% 90%;
+
+    --popover: 222 22% 13%;
+    --popover-foreground: 210 20% 90%;
+
+    --primary: 183 90% 32%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 222 18% 18%;
+    --secondary-foreground: 210 15% 75%;
+
+    --muted: 222 18% 17%;
+    --muted-foreground: 210 12% 68%;
+
+    --accent: 183 70% 28%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 65% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 222 15% 22%;
+    --input: 222 15% 22%;
+    --ring: 183 90% 32%;
+
+    /* Sidebar — dark */
+    --sidebar-background: 222 25% 7%;
+    --sidebar-foreground: 210 20% 80%;
+    --sidebar-primary: 183 90% 32%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 183 70% 18%;
+    --sidebar-accent-foreground: 210 20% 88%;
+    --sidebar-border: 222 15% 18%;
+    --sidebar-ring: 183 90% 32%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--primary)); }
+
+/* Status badges */
+.status-done    { @apply bg-green-100 text-green-700 border border-green-200 dark:bg-green-900/40 dark:text-green-400 dark:border-green-800/50; }
+.status-error   { @apply bg-red-100 text-red-700 border border-red-200 dark:bg-red-900/40 dark:text-red-400 dark:border-red-800/50; }
+.status-pending { @apply bg-yellow-100 text-yellow-700 border border-yellow-200 dark:bg-yellow-900/40 dark:text-yellow-400 dark:border-yellow-800/50; }
+.status-running { @apply bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-900/40 dark:text-blue-400 dark:border-blue-800/50; }
+
+/* Chat message bubbles */
+.msg-user { @apply bg-primary text-primary-foreground self-end rounded-2xl rounded-br-sm; }
+.msg-bot  { @apply bg-secondary text-secondary-foreground self-start rounded-2xl rounded-bl-sm; }
