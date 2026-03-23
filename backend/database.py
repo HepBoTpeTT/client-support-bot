@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from config import settings
+from qdrant_store import init_collection
 import logging
 
 logger = logging.getLogger(__name__)
@@ -48,3 +49,4 @@ def init_db():
             logger.info("Default settings seeded")
     finally:
         db.close()
+    init_collection()

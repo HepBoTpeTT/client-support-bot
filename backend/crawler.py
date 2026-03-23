@@ -8,6 +8,7 @@ import httpx
 from sqlalchemy.orm import Session
 from models import Page, Chunk, CrawlSession
 from datetime import datetime
+from qdrant_store import clear_collection, upsert_chunk, search_similar
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +162,7 @@ def crawl_site(session_id: int, target_url: str, db: Session) -> None:
     db.query(Chunk).delete()
     db.query(Page).delete()
     db.commit()
+    clear_collection()
 
     visited: set[str] = set()
     queued: set[str] = {start_url}
@@ -226,6 +228,16 @@ def crawl_site(session_id: int, target_url: str, db: Session) -> None:
             db.commit()
             db.expunge_all()
 
+            for idx, chunk_text in enumerate(chunks):
+                # простая схема уникальных ID: page_id * 10_000 + idx
+                point_id = page_id * 10_000 + idx
+                upsert_chunk(
+                    chunk_id=point_id,
+                    chunk_text=chunk_text,
+                    page_url=url,
+                    page_title=title[:500],
+                )
+
             del content, title, chunks
             gc.collect()
 
@@ -248,26 +260,5 @@ def crawl_site(session_id: int, target_url: str, db: Session) -> None:
     logger.info(f"Crawl done: {pages_done} pages from {target_url}")
 
 
-def search_chunks(db: Session, query: str, limit: int = 5) -> list[Chunk]:
-    words = [w for w in query.lower().split() if len(w) > 2]
-    if not words:
-        return []
-
-    from sqlalchemy import or_
-    conditions = [Chunk.chunk_text.ilike(f"%{w}%") for w in words]
-    candidates = (
-        db.query(Chunk)
-        .filter(or_(*conditions))
-        .limit(200)
-        .all()
-    )
-
-    scored = []
-    for chunk in candidates:
-        text_lower = chunk.chunk_text.lower()
-        score = sum(text_lower.count(w) for w in words)
-        if score > 0:
-            scored.append((score, chunk))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [c for _, c in scored[:limit]]
+def search_chunks(query: str, limit: int = 5) -> list[dict]:
+    return search_similar(query, limit=limit)

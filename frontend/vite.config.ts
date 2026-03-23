@@ -18,10 +18,15 @@ export default defineConfig({
   base: "./",
   server: {
     port: 5173,
-    proxy: {
-      "/api": { target: "http://127.0.0.1:8000", changeOrigin: true },
-      "/widget.js": { target: "http://127.0.0.1:8000", changeOrigin: true },
-      "/chat-widget": { target: "http://127.0.0.1:8000", changeOrigin: true },
-    },
+    proxy: {                                                                       //
+      "/api": { target: "http://backend:8000", changeOrigin: true },               //  Для развёртки в Docker
+      "/widget.js": { target: "http://backend:8000", changeOrigin: true },         //
+      "/chat-widget": { target: "http://backend:8000", changeOrigin: true },       //
+    }, 
+    // proxy: {
+    //   "/api": { target: "http://127.0.0.1:8000", changeOrigin: true },
+    //   "/widget.js": { target: "http://127.0.0.1:8000", changeOrigin: true },
+    //   "/chat-widget": { target: "http://127.0.0.1:8000", changeOrigin: true },
+    // },
   },
 });

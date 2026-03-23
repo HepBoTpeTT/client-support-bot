@@ -16,8 +16,11 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Proxy (optional, for OpenAI access)
-    http_proxy: str = ""
-    https_proxy: str = ""
+    openai_proxy: str = ""
+
+    # Qdrant
+    qdrant_host: str = "localhost"
+    qdrant_port: int = 6333
 
     @computed_field
     @property

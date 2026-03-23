@@ -371,10 +371,10 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
     db.commit()
 
     # RAG: find relevant chunks
-    relevant_chunks = search_chunks(db, req.message, limit=5)
+    relevant_chunks = search_chunks(req.message, limit=5)
     if relevant_chunks:
-        context = "\n\n---\n\n".join(
-            f"[Источник: {c.page_title} ({c.page_url})]\n{c.chunk_text}"
+        context = "\n---\n".join(
+            f"{c['page_title']} ({c['page_url']})\n{c['chunk_text']}"
             for c in relevant_chunks
         )
     else:
@@ -402,17 +402,21 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
 
     import httpx
     from openai import AsyncOpenAI
-    _proxy = settings.https_proxy or settings.http_proxy or None
+
+    _proxy = settings.openai_proxy or settings.http_proxy or None
     if _proxy:
-        # httpx 0.27.x uses 'proxies' dict; 0.28+ uses 'proxy'
         try:
             _http_client = httpx.AsyncClient(proxy=_proxy)
         except TypeError:
             _http_client = httpx.AsyncClient(proxies={"http://": _proxy, "https://": _proxy})
     else:
         _http_client = None
+
     logger.info(f"OpenAI proxy: {_proxy!r}")
-    client = AsyncOpenAI(api_key=s.openai_key, http_client=_http_client)
+    client = AsyncOpenAI(
+        api_key=s.openai_key,
+        http_client=_http_client
+    )
 
     messages = [{"role": "system", "content": system_prompt}]
     for d in history[:-1]:  # exclude the last (just saved user msg)
