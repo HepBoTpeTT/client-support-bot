@@ -1,136 +1,112 @@
 # Site Assistant — AI-виджет помощника
 
-**Стек:** Python 3.11+ / FastAPI / SQLAlchemy / MySQL · React 18 / TypeScript / Vite / shadcn-ui
+**Стек:** Python 3.11 / FastAPI / SQLAlchemy / MySQL · React 18 / TypeScript / Vite / shadcn-ui · Qdrant · fastembed (BAAI/bge-small-en-v1.5)
 
 ---
 
 ## Структура проекта
 
-```
 site-assistant-py/
-├── backend/          ← FastAPI-приложение (Python)
-│   ├── main.py       ← точка входа, все API-маршруты
-│   ├── crawler.py    ← парсер сайта (httpx + BeautifulSoup)
-│   ├── models.py     ← SQLAlchemy-модели (MySQL)
-│   ├── database.py   ← подключение к БД, init_db()
-│   ├── config.py     ← настройки через .env (pydantic-settings)
-│   ├── widget.py     ← генератор widget.js и iframe-HTML
-│   ├── requirements.txt
-│   └── .env.example
-└── frontend/         ← React + TypeScript (Vite)
-    ├── client/src/
-    │   ├── pages/    ← CrawlerPage, PagesPage, DialogsPage, SettingsPage, EmbedPage
-    │   └── components/
-    └── package.json
-```
+├── backend/ ← FastAPI-приложение (Python)
+│ ├── main.py ← точка входа, все API-маршруты
+│ ├── crawler.py ← парсер сайта (httpx + BeautifulSoup)
+│ ├── qdrant_store.py ← векторное хранилище (Qdrant + fastembed)
+│ ├── models.py ← SQLAlchemy-модели (MySQL)
+│ ├── database.py ← подключение к БД, init_db()
+│ ├── config.py ← настройки через .env (pydantic-settings)
+│ ├── widget.py ← генератор widget.js и iframe-HTML
+│ ├── Dockerfile
+│ └── requirements.txt
+├── frontend/ ← React + TypeScript (Vite)
+│ ├── src/
+│ │ ├── pages/ ← CrawlerPage, PagesPage, DialogsPage, SettingsPage, EmbedPage
+│ │ └── components/
+│ └── package.json
+└── docker-compose.yml
+
+text
 
 ---
 
 ## Требования
 
-- **Python 3.11+**
-- **Node.js 18+** и **npm**
-- **MySQL 8+** (или MariaDB 10.6+)
+- **Docker** и **Docker Compose**
 - **OpenAI API ключ**
+- Для запуска из России — локальный прокси (v2ray/xray или аналог) на `127.0.0.1:10808`
 
 ---
 
-## Шаг 1 — Создать базу данных MySQL
+## Быстрый старт (Docker Compose)
 
-```sql
-CREATE DATABASE site_assistant CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
--- Опционально: создать отдельного пользователя
-CREATE USER 'assistant'@'localhost' IDENTIFIED BY 'StrongPassword123';
-GRANT ALL PRIVILEGES ON site_assistant.* TO 'assistant'@'localhost';
-FLUSH PRIVILEGES;
-```
-
----
-
-## Шаг 2 — Настроить бэкенд
+### 1. Клонировать репозиторий
 
 ```bash
-cd backend
-
-# Создать виртуальное окружение
-python -m venv venv
-venv\Scripts\activate       # Windows
-# source venv/bin/activate  # Linux/macOS
-
-# Установить зависимости
-pip install -r requirements.txt
-
-# Создать .env из шаблона
-copy .env.example .env      # Windows
-# cp .env.example .env      # Linux/macOS
-
-# Открыть .env и заполнить MYSQL_PASSWORD и другие параметры
-```
-
-Содержимое `.env`:
-```env
-MYSQL_HOST=localhost
+git clone https://github.com/your-repo/site-assistant-py.git
+cd site-assistant-py
+2. Создать .env в папке backend/
+text
+# MySQL
+MYSQL_HOST=mysql
 MYSQL_PORT=3306
 MYSQL_USER=root
 MYSQL_PASSWORD=ВАШ_ПАРОЛЬ
 MYSQL_DATABASE=site_assistant
+
+# Qdrant
+QDRANT_HOST=qdrant
+QDRANT_PORT=6333
+
+# Server
+HOST=0.0.0.0
 PORT=8000
-```
+DEBUG=false
 
-Запустить бэкенд:
-```bash
-python main.py
-# API доступен на http://localhost:8000
-# Swagger-документация: http://localhost:8000/docs
-```
+# Прокси для OpenAI (если запуск из России)
+# Укажи адрес локального прокси на хост-машине
+HTTPS_PROXY=http://host.docker.internal:10808
+3. Запустить
+bash
+docker compose up -d --build
+Поднимутся 4 контейнера:
 
-Таблицы создаются **автоматически** при первом запуске.
+Контейнер	Описание	Порт
+mysql	База данных	3306
+qdrant	Векторное хранилище	6333
+backend	FastAPI	8000
+frontend	React (Vite)	5173
+4. Открыть панель управления
+text
+http://localhost:5173
+Первая настройка
+Настройки → вставить OpenAI API ключ (sk-...), задать имя бота и язык
 
----
+Парсинг сайта → ввести URL → нажать «Запустить»
 
-## Шаг 3 — Запустить фронтенд (режим разработки)
+Дождаться завершения — страницы и чанки сохранятся в MySQL и Qdrant
 
-```bash
-cd frontend
-npm install
-npm run dev
-# Открыть http://localhost:5173
-```
+Код встраивания → скопировать JS-сниппет или iFrame
 
-Vite автоматически проксирует все `/api/*` запросы на FastAPI (порт 8000).
+Как работает RAG
+text
+Вопрос пользователя
+       ↓
+Векторизация (fastembed BAAI/bge-small-en-v1.5, локально)
+       ↓
+Поиск top-5 чанков в Qdrant (cosine similarity, 384 dim)
+       ↓
+Чанки вставляются в system prompt OpenAI
+       ↓
+Ответ GPT на основе контента сайта
+Модель fastembed скачивается при сборке образа и хранится в /app/model_cache — интернет при каждом запросе не нужен.
 
----
+Проверка Qdrant
+Веб-интерфейс: http://localhost:6333/dashboard
 
-## Продакшн (фронтенд встроен в бэкенд)
+API: http://localhost:6333/collections
 
-```bash
-# Собрать фронтенд
-cd frontend
-npm run build
-# Артефакты окажутся в frontend/dist/
-
-# Запустить только Python-сервер
-cd ../backend
-python main.py
-# Открыть http://localhost:8000 — подаёт и API, и фронтенд
-```
-
----
-
-## Первая настройка
-
-1. Открыть http://localhost:8000 (или :5173 в dev-режиме)
-2. **Настройки виджета** → вставить OpenAI API ключ (sk-...)
-3. **Парсинг сайта** → ввести URL сайта → нажать «Запустить»
-4. Дождаться завершения (раздел «База знаний» заполнится страницами)
-5. **Код встраивания** → скопировать JS-сниппет или iFrame
-
----
-
-## Встраивание на сторонний сайт
-
-### Вариант 1 — JavaScript (рекомендуется)
-```html
+Встраивание на сторонний сайт
+Вариант 1 — JavaScript (рекомендуется)
+xml
 <!-- Вставить перед </body> -->
 <script>
 (function(){
@@ -139,31 +115,27 @@ python main.py
   document.head.appendChild(s);
 })();
 </script>
-```
-
-### Вариант 2 — iFrame
-```html
+Вариант 2 — iFrame
+xml
 <iframe
   src="http://ВАШ_СЕРВЕР:8000/chat-widget"
   style="position:fixed;bottom:20px;right:20px;width:400px;height:600px;border:none;z-index:9999;border-radius:16px;"
 ></iframe>
-```
+API (Swagger)
+Документация: http://localhost:8000/docs
 
----
+Метод	Путь	Описание
+Метод	Путь	Описание
+GET	/api/settings	Получить настройки
+PATCH	/api/settings	Обновить настройки
+POST	/api/crawl/start	Запустить парсинг {"url":"https://..."}
+GET	/api/crawl/status	Статус последнего парсинга
+GET	/api/pages	Список спарсированных страниц
+DELETE	/api/pages	Очистить базу знаний
+POST	/api/chat	Чат {"message":"...","session_id":"..."}
+GET	/api/dialogs	Список сессий диалогов
+GET	/api/dialogs/{session_id}	Сообщения сессии
+GET	/api/embed-code	Сниппеты для встраивания
+text
 
-## API (Swagger)
-
-Документация доступна на `http://localhost:8000/docs` после запуска сервера.
-
-| Метод | Путь | Описание |
-|---|---|---|
-| GET | `/api/settings` | Получить настройки |
-| PATCH | `/api/settings` | Обновить настройки |
-| POST | `/api/crawl/start` | Запустить парсинг `{"url":"https://..."}` |
-| GET | `/api/crawl/status` | Статус последнего парсинга |
-| GET | `/api/pages` | Список спарсированных страниц |
-| DELETE | `/api/pages` | Очистить базу знаний |
-| POST | `/api/chat` | Чат `{"message":"...","session_id":"..."}` |
-| GET | `/api/dialogs` | Список сессий диалогов |
-| GET | `/api/dialogs/{session_id}` | Сообщения сессии |
-| GET | `/api/embed-code` | Сниппеты для встраивания |
+Скопируй целиком и сохрани как `README.md` в корне проекта.
