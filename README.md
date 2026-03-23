@@ -7,7 +7,6 @@
 ## Структура проекта
 
 ```
-
 site-assistant-py/
 ├── backend/               ← FastAPI-приложение (Python)
 │   ├── main.py            ← точка входа, все API-маршруты
@@ -18,14 +17,13 @@ site-assistant-py/
 │   ├── config.py          ← настройки через .env (pydantic-settings)
 │   ├── widget.py          ← генератор widget.js и iframe-HTML
 │   ├── Dockerfile
+│   ├── docker-compose.yml
 │   └── requirements.txt
 ├── frontend/              ← React + TypeScript (Vite)
 │   ├── src/
 │   │   ├── pages/         ← CrawlerPage, PagesPage, DialogsPage, SettingsPage, EmbedPage
 │   │   └── components/
 │   └── package.json
-└── docker-compose.yml
-
 ```
 
 ---
@@ -42,7 +40,7 @@ site-assistant-py/
 
 1. Клонировать репозиторий
 2. Создать .env в папке *backend/*, внутри имеется файл .env.example.
-3. Запустить `bash docker compose up -d --build `
+3. Запустить `cd backend docker compose up -d --build `
 
 Таблицы создаются **автоматически** при первом запуске.
 
