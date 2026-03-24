@@ -1,7 +1,6 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from config import settings
-from qdrant_store import init_collection
 import logging
 
 logger = logging.getLogger(__name__)
@@ -30,6 +29,7 @@ def get_db():
 
 def init_db():
     from models import Settings, Page, Chunk, Dialog, CrawlSession  # noqa
+    from qdrant_store import init_collection
     Base.metadata.create_all(bind=engine)
 
     # Seed default settings if empty

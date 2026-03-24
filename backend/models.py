@@ -18,6 +18,7 @@ class Settings(Base):
     target_url: Mapped[str] = mapped_column(Text, default="")
     model: Mapped[str] = mapped_column(String(64), default="gpt-4o")
     chat_bg_color: Mapped[str] = mapped_column(String(32), default="#f8f9fb")
+    text_color: Mapped[str] = mapped_column(String(32), default="#222222")
 
 
 class CrawlSession(Base):

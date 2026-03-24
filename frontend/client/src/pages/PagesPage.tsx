@@ -17,11 +17,26 @@ interface Page {
   content: string;
   status: string;
   crawledAt: string | null;
+  contentLen?: number | null; 
 }
 
 export default function PagesPage() {
   const [search, setSearch] = useState("");
   const [selectedPage, setSelectedPage] = useState<Page | null>(null);
+  const [pageContent, setPageContent] = useState<string | null>(null);
+
+  const openPagePreview = async (page: Page) => {
+    setSelectedPage(page);
+    setPageContent(null);
+    try {
+      const res = await fetch(`/api/pages/${page.id}/content`);
+      const data = await res.json();
+      setPageContent(data.content || "Контент отсутствует");
+    } catch {
+      setPageContent("Ошибка загрузки контента");
+    }
+  };
+
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -157,7 +172,7 @@ export default function PagesPage() {
                         </a>
                       </td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">
-                        {page.content ? `${Math.round(page.content.length / 1000)}K знак.` : "—"}
+                        {page.contentLen ? `${Math.round(page.contentLen / 1000)}K знак.` : "—"}
                       </td>
                       <td className="px-4 py-3">
                         <Badge
@@ -178,7 +193,7 @@ export default function PagesPage() {
                             data-testid={`button-view-page-${page.id}`}
                             variant="ghost" size="icon"
                             className="w-7 h-7 hover:bg-muted"
-                            onClick={() => setSelectedPage(page)}
+                            onClick={() => openPagePreview(page)}
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </Button>
@@ -202,7 +217,7 @@ export default function PagesPage() {
       </Card>
 
       {/* Page preview dialog */}
-      <Dialog open={!!selectedPage} onOpenChange={() => setSelectedPage(null)}>
+      <Dialog open={!!selectedPage} onOpenChange={() => { setSelectedPage(null); setPageContent(null); }}>
         <DialogContent className="bg-card border-border max-w-2xl max-h-[80vh]">
           <DialogHeader>
             <DialogTitle className="text-foreground">{selectedPage?.title || "Без заголовка"}</DialogTitle>
@@ -217,7 +232,7 @@ export default function PagesPage() {
           </DialogHeader>
           <ScrollArea className="h-96 rounded border border-border p-4 bg-muted">
             <pre className="text-sm text-foreground whitespace-pre-wrap font-sans">
-              {selectedPage?.content || "Контент отсутствует"}
+              {pageContent === null ? "Загрузка..." : pageContent}
             </pre>
           </ScrollArea>
         </DialogContent>

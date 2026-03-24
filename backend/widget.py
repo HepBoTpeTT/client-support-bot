@@ -1,7 +1,14 @@
 """Generates embeddable widget JS and iframe HTML."""
 
 
-def generate_widget_js(bot_name: str, accent: str, welcome: str, api_url: str, chat_bg: str = "#f8f9fb") -> str:
+def generate_widget_js(
+      bot_name: str,
+      accent: str,
+      welcome: str,
+      api_url: str,
+      chat_bg: str = "#f8f9fb",
+      text_color: str = "#222222",
+  ) -> str:
     bot_name_js = bot_name.replace("'", "\\'")
     welcome_js = welcome.replace("'", "\\'")
     base_url = api_url.replace("/api/chat", "")
@@ -17,6 +24,7 @@ def generate_widget_js(bot_name: str, accent: str, welcome: str, api_url: str, c
 
   var accent = '{accent}';
   var chatBg = '{chat_bg}';
+  var textColor = '{text_color}';
   var botName = '{bot_name_js}';
   var welcome = '{welcome_js}';
   var apiUrl = '{api_url}';
@@ -45,10 +53,10 @@ def generate_widget_js(bot_name: str, accent: str, welcome: str, api_url: str, c
     #sa-widget-operator-bar.visible{{display:flex;}}
     #sa-widget-operator-bar .sa-op-dot{{width:8px;height:8px;border-radius:50%;background:#3a7bc8;animation:sa-pulse 1.5s infinite;}}
     @keyframes sa-pulse{{0%,100%{{opacity:1;}}50%{{opacity:0.35;}}}}
-    #sa-widget-messages{{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:9px;background:${{chatBg}};}}
+    #sa-widget-messages{{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:9px;background:${{chatBg}};color:${{textColor}};}}
     .sa-msg{{max-width:82%;padding:9px 13px;border-radius:12px;font-size:13.5px;line-height:1.5;word-break:break-word;}}
-    .sa-msg.user{{align-self:flex-end;background:${{accent}};color:#fff;border-bottom-right-radius:4px;}}
-    .sa-msg.bot{{align-self:flex-start;background:#fff;color:#222;border-bottom-left-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,0.08);}}
+    .sa-msg.user{{align-self:flex-end;background:${{accent}};color:${{textColor}};border-bottom-right-radius:4px;}}
+    .sa-msg.bot{{align-self:flex-start;background:#fff;color:${{textColor}};border-bottom-left-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,0.08);}}
     .sa-msg.operator{{align-self:flex-start;background:#eef7ff;color:#1a4a7a;border-bottom-left-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border-left:3px solid #3a8fe8;}}
     .sa-msg.system{{align-self:center;background:#f0f0f0;color:#666;font-size:12px;padding:5px 12px;border-radius:99px;font-style:italic;}}
     .sa-msg.typing{{color:#999;font-style:italic;}}
@@ -258,7 +266,14 @@ def generate_widget_js(bot_name: str, accent: str, welcome: str, api_url: str, c
 """
 
 
-def generate_chat_widget_html(bot_name: str, accent: str, welcome: str, api_url: str, chat_bg: str = "#f8f9fb") -> str:
+def generate_chat_widget_html(
+    bot_name: str, 
+    accent: str, 
+    welcome: str, 
+    api_url: str, 
+    chat_bg: str = "#f8f9fb",
+    text_color: str = "#222222",
+  ) -> str:
     welcome_js = welcome.replace("'", "\\'")
     base_url = api_url.replace("/api/chat", "")
 
@@ -272,7 +287,7 @@ def generate_chat_widget_html(bot_name: str, accent: str, welcome: str, api_url:
 <title>{bot_name}</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:{chat_bg};display:flex;flex-direction:column;height:100vh;overflow:hidden}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:{chat_bg};color:{text_color};display:flex;flex-direction:column;height:100vh;overflow:hidden}}
 #header{{background:{accent};color:#fff;padding:14px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0}}
 .avatar{{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,0.25);display:flex;align-items:center;justify-content:center;font-size:17px;color:#fff}}
 .name{{font-weight:600;font-size:14px}}.status{{font-size:11px;opacity:0.85}}
@@ -283,8 +298,8 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 #body{{flex:1;position:relative;overflow:hidden;display:flex;flex-direction:column}}
 #messages{{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:9px}}
 .msg{{max-width:82%;padding:9px 13px;border-radius:12px;font-size:13.5px;line-height:1.5;word-break:break-word}}
-.msg.user{{align-self:flex-end;background:{accent};color:#fff;border-bottom-right-radius:4px}}
-.msg.bot{{align-self:flex-start;background:#fff;color:#222;border-bottom-left-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,0.08)}}
+.msg.user{{align-self:flex-end;background:{accent};color:{text_color};border-bottom-right-radius:4px}}
+.msg.bot{{align-self:flex-start;background:#fff;color:{text_color};border-bottom-left-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,0.08)}}
 .msg.operator{{align-self:flex-start;background:#eef7ff;color:#1a4a7a;border-bottom-left-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border-left:3px solid #3a8fe8}}
 .msg.system{{align-self:center;background:#f0f0f0;color:#666;font-size:12px;padding:5px 12px;border-radius:99px;font-style:italic}}
 .msg.typing{{color:#999;font-style:italic}}

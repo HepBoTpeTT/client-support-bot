@@ -295,7 +295,7 @@ export default function CrawlerPage() {
             )}
 
             {crawlStatus.status === "done" && (
-              <div className="flex items-center gap-2 text-sm text-green-400 bg-green-900/20 rounded p-3">
+              <div className="flex items-center gap-2 text-sm status-done rounded p-3">
                 <CheckCircle className="w-4 h-4" />
                 База знаний успешно создана. Теперь AI-помощник готов отвечать на вопросы.
               </div>

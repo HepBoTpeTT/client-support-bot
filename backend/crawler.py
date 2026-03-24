@@ -2,13 +2,17 @@ import gc
 import logging
 import time
 from collections import deque
+from datetime import datetime
 from urllib.parse import urlparse, urljoin, urlunparse
+
 from bs4 import BeautifulSoup
 import httpx
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
+
 from models import Page, Chunk, CrawlSession
-from datetime import datetime
 from qdrant_store import upsert_chunk, clear_collection, init_collection
+
 
 logger = logging.getLogger(__name__)
 
@@ -270,5 +274,26 @@ def crawl_site(session_id: int, target_url: str, db: Session) -> None:
     logger.info(f"Crawl done: {pages_done} pages from {target_url}")
 
 
-def search_chunks(query: str, limit: int = 5) -> list[dict]:
-    return search_similar(query, limit=limit)
+def search_chunks(db: Session, query: str, limit: int = 5) -> list[Chunk]:
+    words = [w for w in query.lower().split() if len(w) > 2]
+    if not words:
+        return []
+
+    
+    conditions = [Chunk.chunk_text.ilike(f"%{w}%") for w in words]
+    candidates = (
+        db.query(Chunk)
+        .filter(or_(*conditions))
+        .limit(200)
+        .all()
+    )
+
+    scored = []
+    for chunk in candidates:
+        text_lower = chunk.chunk_text.lower()
+        score = sum(text_lower.count(w) for w in words)
+        if score > 0:
+            scored.append((score, chunk))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [c for _, c in scored[:limit]]

@@ -1,23 +1,34 @@
-import asyncio
 import logging
+import os
 import threading
+import time
+import traceback
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
+import httpx
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
+from openai import AsyncOpenAI
 from pydantic import BaseModel
+from sqlalchemy import func, desc, text
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from urllib.parse import quote
 
 from config import settings
-from database import get_db, init_db
-from models import Settings as SettingsModel, Page, Chunk, Dialog, CrawlSession, OperatorSession, OperatorMessage, Achievement, DailyTask
 from crawler import crawl_site, search_chunks
+from database import get_db, init_db, SessionLocal, engine
+from models import (
+    Settings as SettingsModel, Page, Chunk, Dialog,
+    CrawlSession, OperatorSession, OperatorMessage,
+    Achievement, DailyTask,
+)
 from qdrant_store import search_similar
 from widget import generate_widget_js, generate_chat_widget_html
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,23 +43,28 @@ logging.getLogger("hpack").setLevel(logging.WARNING)
 async def lifespan(app: FastAPI):
     # Migrate: add chat_bg_color BEFORE init_db reads the table
     try:
-        from database import engine as _engine
-        import sqlalchemy as _sa
-        with _engine.connect() as _conn:
-            _conn.execute(_sa.text(
+        with engine.connect() as _conn:
+            _conn.execute(text(
                 "ALTER TABLE settings ADD COLUMN chat_bg_color VARCHAR(32) DEFAULT '#f8f9fb'"
             ))
             _conn.commit()
             logger.info("Migrated: added chat_bg_color column")
     except Exception:
         pass  # Column already exists or table doesn't exist yet
+
+    try:
+        with engine.connect() as _conn:
+            _conn.execute(text(
+                "ALTER TABLE settings ADD COLUMN text_color VARCHAR(32) DEFAULT '#222222'"
+            ))
+            _conn.commit()
+    except Exception:
+        pass
     init_db()
     logger.info("Database initialized")
     # Автоочистка: если бэк был прерван на середине парсинга —
     # сессии висят в running. Сбрасываем их при каждом запуске.
     try:
-        from database import SessionLocal
-        from datetime import datetime
         _db = SessionLocal()
         stale = _db.query(CrawlSession).filter(CrawlSession.status == "running").all()
         for s in stale:
@@ -64,13 +80,10 @@ async def lifespan(app: FastAPI):
 
     # Start background thread: auto-clean inactive chat sessions every 15 min
     def _auto_clean_dialogs():
-        import time
         while True:
             time.sleep(900)  # 15 minutes
             try:
-                from database import SessionLocal as _SL
-                from datetime import timedelta
-                _db2 = _SL()
+                _db2 = SessionLocal()
                 cutoff = datetime.now() - timedelta(hours=1)
                 # Find session_ids with last message older than 1h
                 old_sessions = (
@@ -121,6 +134,7 @@ class SettingsUpdate(BaseModel):
     accentColor: Optional[str] = None
     targetUrl: Optional[str] = None
     chatBgColor: Optional[str] = None
+    textColor: Optional[str] = None
 
 
 class CrawlStartRequest(BaseModel):
@@ -153,6 +167,7 @@ def settings_to_dict(s: SettingsModel, mask: bool = True) -> dict:
         "targetUrl": s.target_url,
         "model": s.model,
         "chatBgColor": getattr(s, "chat_bg_color", "#f8f9fb") or "#f8f9fb",
+        "textColor": getattr(s, "text_color", "#222222") or "#222222",
     }
 
 
@@ -188,6 +203,8 @@ def update_settings(data: SettingsUpdate, db: Session = Depends(get_db)):
         "model": "model",
         "chat_bg_color": "chat_bg_color",
         "chatBgColor": "chat_bg_color",
+        "textColor": "text_color",
+        "text_color": "text_color",
     }
 
     for field, value in update_data.items():
@@ -234,7 +251,6 @@ async def start_crawl(
         db.commit()
 
     def run_crawl_sync():
-        from database import SessionLocal
         crawl_db = SessionLocal()
         try:
             crawl_site(session_id, req.url, crawl_db)
@@ -319,11 +335,12 @@ def delete_dialog_session(session_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/pages")
 def get_pages(db: Session = Depends(get_db)):
-    # НЕ загружаем content — он может быть очень большим, фронту он не нужен
-    from sqlalchemy import text
     rows = db.execute(text(
-        "SELECT id, url, title, status, crawled_at FROM pages ORDER BY id"
+        """
+        SELECT id, url, title, status, crawled_at, CHAR_LENGTH(content) AS content_len FROM pages ORDER BY id
+        """
     )).fetchall()
+
     return [
         {
             "id": r[0],
@@ -331,10 +348,17 @@ def get_pages(db: Session = Depends(get_db)):
             "title": r[2],
             "status": r[3],
             "crawledAt": r[4].isoformat() if r[4] else None,
+            "contentLen": r[5],
         }
         for r in rows
     ]
 
+@app.get("/api/pages/{page_id}/content")
+def get_page_content(page_id: int, db: Session = Depends(get_db)):
+    page = db.get(Page, page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+    return {"content": page.content}
 
 @app.delete("/api/pages/{page_id}")
 def delete_page(page_id: int, db: Session = Depends(get_db)):
@@ -425,9 +449,6 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
         f"Используй следующий контекст из базы знаний сайта:\n\n{context}"
     )
 
-    import httpx
-    from openai import AsyncOpenAI
-
     _proxy = settings.openai_proxy or settings.http_proxy or None
     if _proxy:
         try:
@@ -457,7 +478,6 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
         )
         reply = completion.choices[0].message.content or "Извините, не могу ответить прямо сейчас."
     except Exception as e:
-        import traceback
         logger.error(f"OpenAI error: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"OpenAI ошибка: {str(e)}")
 
@@ -479,7 +499,6 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
 @app.get("/api/dialogs")
 def get_dialog_sessions(db: Session = Depends(get_db)):
     # Group by session_id, get latest message and count
-    from sqlalchemy import case
     rows = (
         db.query(
             Dialog.session_id,
@@ -855,7 +874,6 @@ def complete_daily_task(req: CompleteTaskRequest, db: Session = Depends(get_db))
         # Count distinct dates with ALL tasks completed
         all_keys = {t["key"] for t in DAILY_TASK_DEFS}
         # Get all completed dates
-        from sqlalchemy import text
         rows = db.execute(
             text("""
                 SELECT completed_date, COUNT(DISTINCT task_key) as cnt
@@ -868,7 +886,6 @@ def complete_daily_task(req: CompleteTaskRequest, db: Session = Depends(get_db))
         ).fetchall()
         # Compute streak
         streak = 0
-        from datetime import date, timedelta
         check_date = date.today()
         date_set = {r[0] for r in rows}
         while check_date.strftime("%Y-%m-%d") in date_set:
@@ -915,7 +932,6 @@ def get_embed_code(request: Request, db: Session = Depends(get_db)):
 }})();
 </script>"""
 
-    from urllib.parse import quote
     bot_name_enc = quote(s.bot_name if s else "Помощник")
     accent_enc = quote(s.accent_color if s else "#01696f")
     welcome_enc = quote(s.welcome_message if s else "Привет!")
@@ -947,8 +963,9 @@ def serve_widget_js(request: Request, db: Session = Depends(get_db)):
     accent = s.accent_color if s else "#01696f"
     welcome = s.welcome_message if s else "Привет! Чем могу помочь?"
     chat_bg = getattr(s, "chat_bg_color", "#f8f9fb") or "#f8f9fb" if s else "#f8f9fb"
+    text_color = getattr(s, "text_color", "#222222") or "#222222" if s else "#222222" 
 
-    js = generate_widget_js(bot_name, accent, welcome, api_url, chat_bg)
+    js = generate_widget_js(bot_name, accent, welcome, api_url, chat_bg, text_color)
     return Response(content=js, media_type="application/javascript")
 
 
@@ -967,23 +984,20 @@ def serve_chat_widget(
         api = f"{proto}://{host}/api/chat"
     s = db.query(SettingsModel).first()
     chat_bg = getattr(s, "chat_bg_color", "#f8f9fb") or "#f8f9fb" if s else "#f8f9fb"
-    html = generate_chat_widget_html(botName, accent, welcome, api, chat_bg)
+    text_color = getattr(s, "text_color", "#222222") or "#222222" if s else "#222222" 
+    html = generate_chat_widget_html(botName, accent, welcome, api, chat_bg, text_color)
     return HTMLResponse(content=html)
 
 
 # ──────────────────────────────────────────────────────────
 # Serve React frontend (production)
 # ──────────────────────────────────────────────────────────
-import os
-from fastapi.staticfiles import StaticFiles
-
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 if os.path.isdir(FRONTEND_DIST):
     app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
-    def serve_spa(full_path: str):
-        from fastapi.responses import FileResponse
+    def serve_spa(_: str):
         index = os.path.join(FRONTEND_DIST, "index.html")
         return FileResponse(index)
 

@@ -19,6 +19,8 @@ interface SettingsData {
   language: string;
   targetUrl: string;
   model: string;
+  chatBgColor: string;
+  textColor: string;
 }
 
 export default function SettingsPage() {
@@ -214,6 +216,23 @@ export default function SettingsPage() {
                   className="w-36 bg-muted border-border text-foreground"
                 />
                 <span className="text-xs text-muted-foreground">Фон зоны сообщений</span>
+              </div>
+              <div className="mt-3">
+                <Label className="text-xs text-muted-foreground mb-1.5 block">Цвет текста сообщений</Label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={form.textColor || "#222222"}
+                    onChange={e => set("textColor", e.target.value)}
+                    className="w-10 h-10 rounded cursor-pointer border border-border bg-transparent"
+                  />
+                  <Input
+                    value={form.textColor || "#222222"}
+                    onChange={e => set("textColor", e.target.value)}
+                    placeholder="#222222"
+                    className="w-36 bg-muted border-border text-foreground"
+                  />
+                </div>
               </div>
             </div>
           </CardContent>
