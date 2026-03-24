@@ -8,7 +8,7 @@ import httpx
 from sqlalchemy.orm import Session
 from models import Page, Chunk, CrawlSession
 from datetime import datetime
-from qdrant_store import clear_collection, upsert_chunk, search_similar
+from qdrant_store import upsert_chunk, clear_collection, init_collection
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,14 @@ def crawl_site(session_id: int, target_url: str, db: Session) -> None:
     db.query(Chunk).delete()
     db.query(Page).delete()
     db.commit()
-    clear_collection()
+    try:
+        clear_collection()
+    except Exception as e:
+        logger.warning(f"Qdrant clear failed: {e}")
+        try:
+            init_collection()
+        except Exception as e2:
+            logger.warning(f"Qdrant init failed: {e2}")
 
     visited: set[str] = set()
     queued: set[str] = {start_url}
@@ -214,7 +221,7 @@ def crawl_site(session_id: int, target_url: str, db: Session) -> None:
             db.add(page)
             db.flush()
             page_id = page.id
-
+            
             chunks = split_into_chunks(content)
             for idx, chunk_text in enumerate(chunks):
                 db.add(Chunk(
@@ -224,29 +231,32 @@ def crawl_site(session_id: int, target_url: str, db: Session) -> None:
                     chunk_text=chunk_text,
                     chunk_index=idx,
                 ))
-
+            
             db.commit()
             db.expunge_all()
-
+            
             for idx, chunk_text in enumerate(chunks):
-                # простая схема уникальных ID: page_id * 10_000 + idx
                 point_id = page_id * 10_000 + idx
-                upsert_chunk(
-                    chunk_id=point_id,
-                    chunk_text=chunk_text,
-                    page_url=url,
-                    page_title=title[:500],
-                )
-
+                try:
+                    upsert_chunk(
+                        chunk_id=point_id,
+                        chunk_text=chunk_text,
+                        page_url=url,
+                        page_title=title[:500],
+                    )
+                except Exception as e:
+                    logger.warning(f"Qdrant upsert failed (page_id={page_id}, idx={idx}): {e}")
+            
             del content, title, chunks
             gc.collect()
-
+            
             pages_done += 1
             logger.info(f"  → страница #{pages_done} сохранена: {url}")
             if pages_done % 5 == 0 or pages_done == 1:
                 update_progress()
-
+            
             time.sleep(DELAY_BETWEEN_REQUESTS)
+
 
     # Финализируем
     crawl_session = db.get(CrawlSession, session_id)
