@@ -16,6 +16,7 @@ from config import settings
 from database import get_db, init_db
 from models import Settings as SettingsModel, Page, Chunk, Dialog, CrawlSession, OperatorSession, OperatorMessage, Achievement, DailyTask
 from crawler import crawl_site, search_chunks
+from qdrant_store import search_similar
 from widget import generate_widget_js, generate_chat_widget_html
 
 logging.basicConfig(level=logging.INFO)
@@ -370,11 +371,35 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
     db.add(Dialog(session_id=req.session_id, role="user", content=req.message, created_at=datetime.now()))
     db.commit()
 
-    # RAG: find relevant chunks
-    relevant_chunks = search_chunks(req.message, limit=5)
+    # RAG: first try Qdrant, fallback to MySQL
+    relevant_chunks = []
+    retrieval_backend = "none"
+    
+    try:
+        relevant_chunks = search_similar(req.message, limit=5)
+        retrieval_backend = "qdrant"
+    except Exception as e:
+        logger.warning(f"Qdrant search failed, fallback to MySQL: {e}")
+        try:
+            mysql_chunks = search_chunks(db, req.message, limit=5)
+            relevant_chunks = [
+                {
+                    "chunk_text": c.chunk_text,
+                    "page_url": c.page_url,
+                    "page_title": c.page_title,
+                    "score": None,
+                }
+                for c in mysql_chunks
+            ]
+            retrieval_backend = "mysql"
+        except Exception as e2:
+            logger.error(f"MySQL fallback search failed: {e2}")
+            relevant_chunks = []
+            retrieval_backend = "none"
+    
     if relevant_chunks:
-        context = "\n---\n".join(
-            f"{c['page_title']} ({c['page_url']})\n{c['chunk_text']}"
+        context = "\n\n---\n\n".join(
+            f"[Источник: {c['page_title']} ({c['page_url']})]\n{c['chunk_text']}"
             for c in relevant_chunks
         )
     else:
@@ -440,7 +465,11 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
     db.add(Dialog(session_id=req.session_id, role="assistant", content=reply, created_at=datetime.now()))
     db.commit()
 
-    return {"reply": reply, "sourcesUsed": len(relevant_chunks)}
+    return {
+        "reply": reply,
+        "sourcesUsed": len(relevant_chunks),
+        "retrievalBackend": retrieval_backend,
+    }
 
 
 # ──────────────────────────────────────────────────────────
