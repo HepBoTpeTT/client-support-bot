@@ -26,8 +26,10 @@ from models import (
     CrawlSession, OperatorSession, OperatorMessage,
     Achievement, DailyTask,
 )
-from qdrant_store import search_similar
-from widget import generate_widget_js, generate_chat_widget_html
+from qdrant_store import search_similar, clear_collection
+
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
 
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +39,12 @@ logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("hpack").setLevel(logging.WARNING)
+
+
+
+from fastembed import TextEmbedding
+for m in TextEmbedding.list_supported_models():
+    logger.info(m["model"])
 
 
 @asynccontextmanager
@@ -107,6 +115,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Site Assistant API", lifespan=lifespan)
 
+BASE_DIR = Path(__file__).resolve().parent
+WIDGET_STATIC_DIR = BASE_DIR / "widget-static"
+
+app.mount(
+    "/widget-static",
+    StaticFiles(directory=WIDGET_STATIC_DIR),
+    name="widget-static",
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -127,6 +144,7 @@ class SettingsUpdate(BaseModel):
     language: Optional[str] = None
     target_url: Optional[str] = None
     model: Optional[str] = None
+    crawler_settings: Optional[str] = None
     # camelCase (from frontend)
     openaiKey: Optional[str] = None
     botName: Optional[str] = None
@@ -135,6 +153,7 @@ class SettingsUpdate(BaseModel):
     targetUrl: Optional[str] = None
     chatBgColor: Optional[str] = None
     textColor: Optional[str] = None
+    crawlerSettings: Optional[str] = None
 
 
 class CrawlStartRequest(BaseModel):
@@ -168,6 +187,7 @@ def settings_to_dict(s: SettingsModel, mask: bool = True) -> dict:
         "model": s.model,
         "chatBgColor": getattr(s, "chat_bg_color", "#f8f9fb") or "#f8f9fb",
         "textColor": getattr(s, "text_color", "#222222") or "#222222",
+        "crawlerSettings": s.crawler_settings
     }
 
 
@@ -205,6 +225,8 @@ def update_settings(data: SettingsUpdate, db: Session = Depends(get_db)):
         "chatBgColor": "chat_bg_color",
         "textColor": "text_color",
         "text_color": "text_color",
+        "crawlerSettings": "crawler_settings",
+        "crawler_settings": "crawler_settings"
     }
 
     for field, value in update_data.items():
@@ -256,6 +278,7 @@ async def start_crawl(
             crawl_site(session_id, req.url, crawl_db)
         except Exception as e:
             logger.error(f"Crawl error: {e}")
+            logger.error(traceback.format_exc())
             sess = crawl_db.get(CrawlSession, session_id)
             if sess:
                 sess.status = "error"
@@ -372,10 +395,15 @@ def delete_page(page_id: int, db: Session = Depends(get_db)):
 
 @app.delete("/api/pages")
 def clear_pages(db: Session = Depends(get_db)):
-    db.query(Chunk).delete()
-    db.query(Page).delete()
-    db.commit()
-    return {"ok": True}
+    err = False
+    try:
+        db.query(Chunk).delete()
+        db.query(Page).delete()
+        db.commit()
+        clear_collection()
+    except:
+        err = True
+    return {"ok": not err}
 
 
 # ──────────────────────────────────────────────────────────
@@ -391,6 +419,15 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
     if not s or not s.openai_key:
         raise HTTPException(status_code=400, detail="OpenAI API ключ не настроен. Обратитесь к администратору.")
 
+    # Get history BEFORE saving current message
+    history = (
+        db.query(Dialog)
+        .filter(Dialog.session_id == req.session_id)
+        .order_by(Dialog.created_at.asc())
+        .limit(8)
+        .all()
+    )
+
     # Save user message
     db.add(Dialog(session_id=req.session_id, role="user", content=req.message, created_at=datetime.now()))
     db.commit()
@@ -398,7 +435,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
     # RAG: first try Qdrant, fallback to MySQL
     relevant_chunks = []
     retrieval_backend = "none"
-    
+
     try:
         relevant_chunks = search_similar(req.message, limit=5)
         retrieval_backend = "qdrant"
@@ -420,7 +457,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
             logger.error(f"MySQL fallback search failed: {e2}")
             relevant_chunks = []
             retrieval_backend = "none"
-    
+
     if relevant_chunks:
         context = "\n\n---\n\n".join(
             f"[Источник: {c['page_title']} ({c['page_url']})]\n{c['chunk_text']}"
@@ -429,14 +466,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
     else:
         context = "База знаний пуста. Ответь на основе общих знаний."
 
-    # Get recent conversation history
-    history = (
-        db.query(Dialog)
-        .filter(Dialog.session_id == req.session_id)
-        .order_by(Dialog.created_at)
-        .limit(8)
-        .all()
-    )
+    logging.info("Контекст, направляемый в OpenAI API: \n%s", context)
 
     lang_map = {"ru": "русском", "en": "английском", "uk": "украинском"}
     lang_name = lang_map.get(s.language, s.language)
@@ -465,9 +495,11 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
     )
 
     messages = [{"role": "system", "content": system_prompt}]
-    for d in history[:-1]:  # exclude the last (just saved user msg)
+    for d in history:
         messages.append({"role": d.role, "content": d.content})
     messages.append({"role": "user", "content": req.message})
+
+    logging.info("Сообщение, отправляемое боту:\n%s", messages)
 
     try:
         completion = await client.chat.completions.create(
@@ -913,36 +945,23 @@ def mark_achievements_seen(db: Session = Depends(get_db)):
 # Embed code
 # ──────────────────────────────────────────────────────────
 
+
 @app.get("/api/embed-code")
 def get_embed_code(request: Request, db: Session = Depends(get_db)):
     s = db.query(SettingsModel).first()
-    host = request.headers.get("host", f"localhost:{settings.port}")
-    proto = request.headers.get("x-forwarded-proto", "http")
-    base_url = f"{proto}://{host}"
+    base_url = settings.public_base_url.rstrip("/")
 
     js_snippet = f"""<!-- Site Assistant Widget -->
-<script>
-(function(){{
-  var s=document.createElement('script');
-  s.src='{base_url}/widget.js';
-  s.setAttribute('data-bot-name','{s.bot_name if s else "Помощник"}');
-  s.setAttribute('data-accent','{s.accent_color if s else "#01696f"}');
-  s.setAttribute('data-api','{base_url}/api/chat');
-  document.head.appendChild(s);
-}})();
-</script>"""
+<script
+    src="{base_url}/widget-static/saportus-widget.js"
+    data-base-url="{base_url}"
+></script>"""
 
-    bot_name_enc = quote(s.bot_name if s else "Помощник")
-    accent_enc = quote(s.accent_color if s else "#01696f")
-    welcome_enc = quote(s.welcome_message if s else "Привет!")
-    api_enc = quote(f"{base_url}/api/chat")
 
-    iframe_snippet = f"""<!-- Site Assistant Widget (iFrame) -->
-<iframe
-  src="{base_url}/chat-widget?botName={bot_name_enc}&accent={accent_enc}&welcome={welcome_enc}&api={api_enc}"
-  style="position:fixed;bottom:20px;right:20px;width:400px;height:600px;border:none;z-index:9999;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.18);"
-  allow="microphone"
-  title="{s.bot_name if s else 'Помощник'}">
+    iframe_snippet = f"""<iframe
+    src="{base_url}/chat-widget-html?baseUrl={quote(base_url, safe='')}"
+    style="position:fixed; bottom:20px; right:20px; width:400px; height:660px; border:none; z-index:9999; background:transparent;"
+    title="{s.bot_name if s else 'Помощник'}">
 </iframe>"""
 
     return {"jsSnippet": js_snippet, "iframeSnippet": iframe_snippet}
@@ -951,41 +970,26 @@ def get_embed_code(request: Request, db: Session = Depends(get_db)):
 # ──────────────────────────────────────────────────────────
 # Widget endpoints
 # ──────────────────────────────────────────────────────────
+@app.get("/api/widget-config")
+def get_actual_bot_config(request: Request, db: Session = Depends(get_db)):
 
-@app.get("/widget.js")
-def serve_widget_js(request: Request, db: Session = Depends(get_db)):
+    # for: backend/widget-static/saportus-widget.js
+    #      backend/widget-static/saportus-widget-iframe.html
+
     s = db.query(SettingsModel).first()
-    host = request.headers.get("host", f"localhost:{settings.port}")
-    proto = request.headers.get("x-forwarded-proto", "http")
-    api_url = f"{proto}://{host}/api/chat"
-
-    bot_name = s.bot_name if s else "Помощник"
-    accent = s.accent_color if s else "#01696f"
-    welcome = s.welcome_message if s else "Привет! Чем могу помочь?"
-    chat_bg = getattr(s, "chat_bg_color", "#f8f9fb") or "#f8f9fb" if s else "#f8f9fb"
-    text_color = getattr(s, "text_color", "#222222") or "#222222" if s else "#222222" 
-
-    js = generate_widget_js(bot_name, accent, welcome, api_url, chat_bg, text_color)
-    return Response(content=js, media_type="application/javascript")
+    return {
+        "bot_name": s.bot_name if s else "САПОРТУС",
+        "accent_color": s.accent_color if s else  "#8000ff",
+        "welcome_message": s.welcome_message if s else  "Привет! Чем могу помочь?",
+        "chat_bg_color": s.chat_bg_color if s else  "#f8f9fb",
+        "text_color": s.text_color if s else  "#222222"
+    }
 
 
-@app.get("/chat-widget", response_class=HTMLResponse)
-def serve_chat_widget(
-    request: Request,
-    botName: str = "Помощник",
-    accent: str = "#01696f",
-    welcome: str = "Привет! Чем могу помочь?",
-    api: str = "",
-    db: Session = Depends(get_db),
-):
-    if not api:
-        host = request.headers.get("host", f"localhost:{settings.port}")
-        proto = request.headers.get("x-forwarded-proto", "http")
-        api = f"{proto}://{host}/api/chat"
-    s = db.query(SettingsModel).first()
-    chat_bg = getattr(s, "chat_bg_color", "#f8f9fb") or "#f8f9fb" if s else "#f8f9fb"
-    text_color = getattr(s, "text_color", "#222222") or "#222222" if s else "#222222" 
-    html = generate_chat_widget_html(botName, accent, welcome, api, chat_bg, text_color)
+
+@app.get("/chat-widget-html", response_class=HTMLResponse)
+def serve_chat_widget(request: Request):
+    html = (WIDGET_STATIC_DIR / "saportus-widget-iframe.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html)
 
 

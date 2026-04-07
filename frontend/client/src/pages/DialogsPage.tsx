@@ -81,11 +81,11 @@ export default function DialogsPage() {
         {sessions.length > 0 && (
           <Button
             size="sm"
-            variant="outline"
+            variant="destructive"
             data-testid="btn-delete-all-dialogs"
             onClick={() => deleteAll.mutate()}
             disabled={deleteAll.isPending}
-            className="h-8 text-xs gap-1.5 text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10"
+            className="gap-2"
           >
             <Trash2 className="w-3.5 h-3.5" />
             Очистить всё

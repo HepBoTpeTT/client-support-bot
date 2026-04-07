@@ -81,6 +81,31 @@ export default function EmbedPage() {
         <div className="text-muted-foreground text-sm">Загрузка...</div>
       ) : (
         <div className="space-y-5">
+          {/* Instructions */}
+          <Card className="bg-card border-border">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Инструкция по установке</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ol className="space-y-3 text-sm text-muted-foreground">
+                {[
+                  "Перейдите в раздел «Настройки виджета», введите ваш OpenAI API ключ и настройте парсинг",
+                  "Запустите парсинг вашего сайта в разделе «Парсинг сайта» — дождитесь завершения",
+                  "Убедитесь, что в разделе «База знаний» отображаются страницы со статусом «Готово»",
+                  "Скопируйте JS-сниппет или iFrame-код и вставьте на страницы вашего сайта",
+                  "Виджет появится в правом нижнем углу и будет готов отвечать на вопросы посетителей",
+                ].map((step, i) => (
+                  <li key={i} className="flex gap-3">
+                    <span className="w-5 h-5 rounded-full bg-primary/20 text-primary text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
+                      {i + 1}
+                    </span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+            </CardContent>
+          </Card>
+
           {/* JS snippet */}
           <Card className="bg-card border-border">
             <CardHeader className="pb-2 flex-row items-center justify-between">
@@ -96,7 +121,7 @@ export default function EmbedPage() {
             <CardContent>
               <pre
                 data-testid="code-js-snippet"
-                className="bg-zinc-900 rounded-lg p-4 text-xs text-green-400 font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed"
+                className="bg-primary/20 text-primary border-primary/30 border rounded-lg p-4 text-xs font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed"
               >
                 {embed?.jsSnippet}
               </pre>
@@ -108,7 +133,7 @@ export default function EmbedPage() {
             <CardHeader className="pb-2 flex-row items-center justify-between">
               <div>
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <Badge className="bg-blue-900/40 text-blue-400 border-blue-800/50 text-xs">iFrame</Badge>
+                  <Badge className="bg-[rgba(0,48,182,0.2)] text-[hsl(216.7,85.9%,41.8%)] border-blue-800/50 text-xs">iFrame</Badge>
                   iFrame-встраивание
                 </CardTitle>
                 <CardDescription className="mt-1">Альтернативный метод через iframe — полная изоляция стилей</CardDescription>
@@ -118,35 +143,10 @@ export default function EmbedPage() {
             <CardContent>
               <pre
                 data-testid="code-iframe-snippet"
-                className="bg-zinc-900 rounded-lg p-4 text-xs text-blue-400 font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed"
+                className="bg-[rgba(0,48,182,0.2)] text-[hsl(216.7,85.9%,41.8%)] border-blue-800/50 border rounded-lg p-4 text-xs font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed"
               >
                 {embed?.iframeSnippet}
               </pre>
-            </CardContent>
-          </Card>
-
-          {/* Instructions */}
-          <Card className="bg-card border-border">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Инструкция по установке</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ol className="space-y-3 text-sm text-muted-foreground">
-                {[
-                  "Перейдите в раздел «Настройки виджета» и введите ваш OpenAI API ключ",
-                  "Запустите парсинг вашего сайта в разделе «Парсинг сайта» — дождитесь завершения",
-                  "Убедитесь, что в разделе «База знаний» отображаются страницы со статусом «Готово»",
-                  "Скопируйте JS-сниппет или iFrame-код и вставьте на страницы вашего сайта",
-                  "Виджет появится в правом нижнем углу и будет готов отвечать на вопросы посетителей",
-                ].map((step, i) => (
-                  <li key={i} className="flex gap-3">
-                    <span className="w-5 h-5 rounded-full bg-primary/20 text-primary text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
-                      {i + 1}
-                    </span>
-                    <span>{step}</span>
-                  </li>
-                ))}
-              </ol>
             </CardContent>
           </Card>
         </div>

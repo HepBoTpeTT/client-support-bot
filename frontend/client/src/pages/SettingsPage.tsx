@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ interface SettingsData {
   model: string;
   chatBgColor: string;
   textColor: string;
+  crawlerSettings: string;
 }
 
 export default function SettingsPage() {
@@ -33,9 +34,14 @@ export default function SettingsPage() {
   const { data: settings, isLoading } = useQuery<SettingsData>({
     queryKey: ["/api/settings"],
   });
+  const [tags, setTags] = useState<string[]>([]);
+  const [inputValue, setInputValue] = useState("");
 
   useEffect(() => {
     if (settings) setForm(settings);
+    if (settings?.crawlerSettings) {
+      setTags(settings.crawlerSettings.split(" ").filter(Boolean));
+    }
   }, [settings]);
 
   const update = useMutation({
@@ -43,6 +49,7 @@ export default function SettingsPage() {
     onSuccess: () => {
       toast({ title: "Настройки сохранены" });
       qc.invalidateQueries({ queryKey: ["/api/settings"] });
+      setInputValue("");
     },
     onError: (e: any) => {
       toast({ title: "Ошибка сохранения", description: e.message, variant: "destructive" });
@@ -52,6 +59,21 @@ export default function SettingsPage() {
   const set = (key: keyof SettingsData, value: string) => {
     setForm(f => ({ ...f, [key]: value }));
   };
+
+
+  function getTagClass(tag: string) {
+    if (tag.startsWith('.')) return 'bg-primary/20 text-primary border-primary/30';                              //class-item class
+    if (tag.startsWith('#')) return 'bg-[rgba(255,232,0,0.2)] border-[rgba(177,156,0,0.3)] text-yellow-700'; //id-item class
+    return 'bg-[rgba(0,48,182,0.2)] text-[hsl(216.7,85.9%,41.8%)] border-blue-800/50';                       //tag-item class
+  }
+
+  function handleTagDelete(index: number) {
+    const newTags = tags.filter((_, i) => i !== index);
+    setTags(newTags);
+    const value = newTags.join(" ");
+    set("crawlerSettings", value);
+  }
+
 
   if (isLoading) return <div className="p-8 text-muted-foreground">Загрузка...</div>;
 
@@ -161,6 +183,47 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="text-base">Настройки парсинга</CardTitle>
+            <CardDescription>
+              Укажите <code className="bg-[rgba(0,48,182,0.2)] text-[hsl(216.7,85.9%,41.8%)] border-blue-800/50 border rounded-md p-1">теги</code>
+              , <code className="bg-primary/20 text-primary border-primary/30 border rounded-md p-1">.классы</code>
+              , <code className="bg-[rgba(255,232,0,0.2)] border-[rgba(177,156,0,0.3)] text-yellow-700 border rounded-md p-1">#id</code>
+              , которые следует игнорировать
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="min-h-[26px] mb-3">
+              {/* Теги */}
+              {tags.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {tags.map((tag, i) => (
+                  <div key={i} className={`flex border items-center gap-1 p-1 cursor-pointer rounded-md text-xs font-mono
+                    ${getTagClass(tag)}`}
+                  >
+                    <span>{tag}</span>
+                    <button type="button" onClick={() => handleTagDelete(i)}
+                      className="ml-1 opacity-60 hover:opacity-100">×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            </div>
+            <Input
+              type="text"
+              value={inputValue}
+              onChange={e => {
+                setInputValue(e.target.value);
+                const newFromInput = e.target.value.split(" ").filter(Boolean);
+                set("crawlerSettings", [...tags, ...newFromInput].join(" "));
+              }}
+              placeholder="Укажите элементы, которые следует исключить из парсинга"
+              className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+            />
+          </CardContent>
+        </Card>
+
         {/* Appearance */}
         <Card className="bg-card border-border">
           <CardHeader className="pb-3">
@@ -187,16 +250,15 @@ export default function SettingsPage() {
                   placeholder="#01696f"
                   className="w-36 bg-muted border-border text-foreground"
                 />
-                <button
-                  type="button"
+                <Button
                   onClick={openChat}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-white transition-opacity hover:opacity-90 active:opacity-75"
+                  className="bg-primary hover:bg-primary/90 gap-2"
                   style={{ background: form.accentColor || "#01696f" }}
                   title="Открыть тестовый чат"
                 >
                   <Play className="w-3.5 h-3.5" />
                   Предпросмотр
-                </button>
+                </Button>
               </div>
             </div>
             <div className="mt-3">
@@ -243,7 +305,7 @@ export default function SettingsPage() {
           data-testid="button-save-settings"
           onClick={() => update.mutate(form)}
           disabled={update.isPending}
-          className="w-full bg-primary hover:bg-primary/90 text-white gap-2"
+          className="w-full bg-primary hover:bg-primary/90 gap-2"
         >
           <Save className="w-4 h-4" />
           {update.isPending ? "Сохранение..." : "Сохранить настройки"}

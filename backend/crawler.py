@@ -10,8 +10,8 @@ import httpx
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from models import Page, Chunk, CrawlSession
-from qdrant_store import upsert_chunk, clear_collection, init_collection
+from models import Page, Chunk, CrawlSession, Settings
+from qdrant_store import upsert_chunk, clear_collection, init_collection, is_low_quality_chunk
 
 
 logger = logging.getLogger(__name__)
@@ -69,15 +69,16 @@ def has_skip_extension(url: str) -> bool:
     return any(path.endswith(ext) for ext in SKIP_EXTENSIONS)
 
 
-def parse_html(html: str, base_url: str) -> tuple[str, str, list[str]]:
-    """Один проход BeautifulSoup — возвращает (title, text, links)."""
+def parse_html(html: str, base_url: str, db: Session) -> tuple[str, str, list[str]]:
     soup = BeautifulSoup(html, "html.parser")
 
-    # Ссылки — до удаления тегов
+    # Ссылки — ДО удаления тегов
     links = []
     seen = set()
-    for tag in soup.find_all("a", href=True):
-        href = tag["href"].strip()
+    for a in soup.find_all("a", href=True):
+        if not a.attrs:
+            continue
+        href = a.get("href", "").strip()
         if not href or any(href.startswith(p) for p in ("mailto:", "tel:", "javascript:", "#", "data:")):
             continue
         norm = normalize_url(href, base_url)
@@ -85,9 +86,33 @@ def parse_html(html: str, base_url: str) -> tuple[str, str, list[str]]:
             seen.add(norm)
             links.append(norm)
 
-    # Удаляем шумовые теги
-    for tag in soup(["script", "style", "noscript", "svg", "iframe"]):
-        tag.decompose()
+    # Парсим пользовательские настройки (один раз, до всего остального)
+    s = db.query(Settings).first()
+    crawler_settings = s.crawler_settings if s else ""
+    user_items = crawler_settings.split() if crawler_settings else []
+
+    extra_tags    = [x for x in user_items if not x.startswith('.') and not x.startswith('#')]
+    extra_classes = [x[1:] for x in user_items if x.startswith('.')]
+    extra_ids     = [x[1:] for x in user_items if x.startswith('#')]
+
+    # Удаляем по тегам
+    if extra_tags:
+        for t in soup(extra_tags):
+            t.decompose()
+
+    # Удаляем по классам и id — через список, не во время итерации
+    to_remove = []
+    for t in soup.find_all(True):
+        if not hasattr(t, 'attrs') or not t.attrs:
+            continue
+        classes = " ".join(t.get("class", [])).lower()
+        tag_id  = (t.get("id") or "").lower()
+        if (any(x in classes for x in extra_classes) or
+                any(x == tag_id for x in extra_ids)):
+            to_remove.append(t)
+
+    for t in to_remove:
+        t.decompose()
 
     # Заголовок
     title = ""
@@ -97,8 +122,16 @@ def parse_html(html: str, base_url: str) -> tuple[str, str, list[str]]:
         h1 = soup.find("h1")
         title = h1.get_text(strip=True) if h1 else "Без заголовка"
 
-    # Текст
-    main = soup.find("main") or soup.find(attrs={"role": "main"}) or soup.body
+    # Основной контент
+    main = (
+        soup.find("main") or
+        soup.find(attrs={"role": "main"}) or
+        soup.find("article") or
+        soup.find(id=lambda x: x and "content" in x.lower()) or
+        soup.find(attrs={"class": lambda c: c and "content" in " ".join(c).lower()}) or
+        soup.body
+    )
+
     text = " ".join((main or soup).get_text(separator=" ").split())
 
     soup.clear()
@@ -110,19 +143,40 @@ def parse_html(html: str, base_url: str) -> tuple[str, str, list[str]]:
 def split_into_chunks(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
     if not text:
         return []
-    if overlap >= chunk_size:
-        overlap = max(0, chunk_size // 3)
-    n = len(text)
-    if n <= chunk_size:
+    if len(text) <= chunk_size:
         return [text]
-    chunks: list[str] = []
+
+    chunks = []
     start = 0
+    n = len(text)
+
     while start < n:
         end = min(start + chunk_size, n)
-        chunks.append(text[start:end])
-        if end == n:
+        if end < n:
+            boundary = max(
+                text.rfind(". ", start, end),
+                text.rfind("! ", start, end),
+                text.rfind("? ", start, end),
+            )
+            if boundary > start + chunk_size // 2:
+                end = boundary + 1  # включаем точку
+
+        chunks.append(text[start:end].strip())
+        if end >= n:
             break
-        start = max(0, end - overlap)
+
+        new_start = max(0, end - overlap)
+        next_sentence = max(
+            text.find(". ", new_start),
+            text.find("! ", new_start),
+            text.find("? ", new_start),
+        )
+        if next_sentence != -1 and next_sentence < end:
+            start = next_sentence + 2
+        else:
+            # Нет границы — сдвигаемся до начала следующего слова
+            word_start = text.find(" ", new_start)
+            start = word_start + 1 if word_start != -1 else new_start
     return chunks
 
 
@@ -202,7 +256,7 @@ def crawl_site(session_id: int, target_url: str, db: Session) -> None:
             if not html:
                 continue
 
-            title, content, links = parse_html(html, url)
+            title, content, links = parse_html(html, url, db)
             del html
 
             if len(content) < 50:
@@ -241,6 +295,9 @@ def crawl_site(session_id: int, target_url: str, db: Session) -> None:
             
             for idx, chunk_text in enumerate(chunks):
                 point_id = page_id * 10_000 + idx
+                if is_low_quality_chunk(chunk_text):
+                    logger.debug(f"Пропущен низкокачественный чанк: {chunk_text[:60]}...")
+                    continue
                 try:
                     upsert_chunk(
                         chunk_id=point_id,

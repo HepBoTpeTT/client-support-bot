@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = False
+    public_base_url: str = "http://localhost:8000"
 
     # Proxy (optional, for OpenAI access)
     openai_proxy: str = ""
@@ -21,6 +22,9 @@ class Settings(BaseSettings):
     # Qdrant
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333
+
+    # Embedding model
+    embedding_model: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 
     @computed_field
     @property

@@ -37,6 +37,9 @@ services:
     container_name: backend
     ports:
       - "8000:8000"
+    volumes:
+      - ./:/app
+      - model_cache:/model_cache
     depends_on:
       mysql:
         condition: service_healthy
@@ -68,7 +71,7 @@ services:
 volumes:
   mysql_data:
   qdrant_storage:
-
+  model_cache:
 
 networks:
   app_net:

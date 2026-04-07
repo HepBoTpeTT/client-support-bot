@@ -42,7 +42,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <Bot className="w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="text-sm font-semibold text-foreground">Site Assistant</div>
+              <div className="text-sm font-semibold text-foreground">Сапортус</div>
               <div className="text-xs text-muted-foreground">AI-помощник</div>
             </div>
           </div>

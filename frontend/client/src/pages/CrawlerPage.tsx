@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,9 @@ export default function CrawlerPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
+  const [justFinished, setJustFinished] = useState(false);
+  const prevStatusRef = useRef<string | null>(null);
+
   const { data: settings } = useQuery<any>({
     queryKey: ["/api/settings"],
   });
@@ -46,6 +49,18 @@ export default function CrawlerPage() {
   useEffect(() => {
     if (settings?.targetUrl && !url) setUrl(settings.targetUrl);
   }, [settings]);
+
+  // Hide "Done" message in new session
+  useEffect(() => {
+  if (
+    crawlStatus?.status === "done" &&
+    prevStatusRef.current !== null &&
+    prevStatusRef.current !== "done"
+  ) {
+    setJustFinished(true);
+  }
+  prevStatusRef.current = crawlStatus?.status ?? null;
+}, [crawlStatus?.status]);
 
   const deleteCrawlHistory = useMutation({
     mutationFn: () => apiRequest("DELETE", "/api/crawl/sessions"),
@@ -133,7 +148,7 @@ export default function CrawlerPage() {
 
       {/* Daily tasks widget */}
       <Card className={cn(
-        "mb-6 border transition-colors",
+        "mb-6 border ",
         allDone
           ? "bg-green-50 border-green-200 dark:bg-green-900/10 dark:border-green-800/40"
           : "bg-card border-border"
@@ -156,7 +171,7 @@ export default function CrawlerPage() {
                 </Link>
               )}
               <Link href="/achievements">
-                <span className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors cursor-pointer">
+                <span className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary cursor-pointer">
                   <Trophy className="w-3.5 h-3.5" />
                   {gamification?.stats?.unlocked ?? 0}/{gamification?.stats?.total ?? 0}
                 </span>
@@ -174,7 +189,7 @@ export default function CrawlerPage() {
                   key={task.key}
                   data-testid={`daily-task-${task.key}`}
                   className={cn(
-                    "flex items-center gap-3 p-3 rounded-lg border transition-colors",
+                    "flex items-center gap-3 p-3 rounded-lg border ",
                     task.completed
                       ? "bg-green-50 border-green-200 dark:bg-green-900/10 dark:border-green-800/30"
                       : "bg-muted/40 border-border"
@@ -219,6 +234,8 @@ export default function CrawlerPage() {
           )}
         </CardContent>
       </Card>
+      
+      
 
       {/* URL input */}
       <Card className="mb-6 bg-card border-border">
@@ -240,7 +257,7 @@ export default function CrawlerPage() {
               data-testid="button-start-crawl"
               onClick={handleStart}
               disabled={startCrawl.isPending || crawlStatus?.status === "running"}
-              className="bg-primary hover:bg-primary/90 text-white gap-2"
+              className="bg-primary hover:bg-primary/90 gap-2"
             >
               {crawlStatus?.status === "running" ? (
                 <><RefreshCw className="w-4 h-4 animate-spin" /> Парсинг...</>
@@ -294,7 +311,7 @@ export default function CrawlerPage() {
               </div>
             )}
 
-            {crawlStatus.status === "done" && (
+            {crawlStatus.status === "done" && justFinished && (
               <div className="flex items-center gap-2 text-sm status-done rounded p-3">
                 <CheckCircle className="w-4 h-4" />
                 База знаний успешно создана. Теперь AI-помощник готов отвечать на вопросы.
@@ -315,11 +332,11 @@ export default function CrawlerPage() {
               </CardTitle>
               <Button
                 size="sm"
-                variant="outline"
+                variant="destructive"
                 data-testid="btn-delete-crawl-history"
                 onClick={() => deleteCrawlHistory.mutate()}
                 disabled={deleteCrawlHistory.isPending}
-                className="h-7 text-xs gap-1.5 text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10"
+                className="gap-2"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 Очистить историю

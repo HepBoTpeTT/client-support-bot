@@ -11,6 +11,7 @@ class Settings(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     openai_key: Mapped[str] = mapped_column(Text, default="")
+    crawler_settings: Mapped[str] = mapped_column(Text, default="script style noscript svg iframe nav header footer aside button form input select")
     bot_name: Mapped[str] = mapped_column(String(255), default="Помощник")
     welcome_message: Mapped[str] = mapped_column(Text, default="Привет! Чем могу помочь?")
     accent_color: Mapped[str] = mapped_column(String(32), default="#01696f")
