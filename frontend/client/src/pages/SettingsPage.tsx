@@ -4,6 +4,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ColorField } from "@/components/ui/color-field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
@@ -16,12 +17,15 @@ interface SettingsData {
   botName: string;
   welcomeMessage: string;
   accentColor: string;
+  chatBgColor: string;
+  userBubbleBg: string;
+  userTextColor: string;
+  botBubbleBg: string;
+  botTextColor: string;
+  crawlerSettings: string;
   language: string;
   targetUrl: string;
   model: string;
-  chatBgColor: string;
-  textColor: string;
-  crawlerSettings: string;
 }
 
 export default function SettingsPage() {
@@ -183,9 +187,13 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        {/* Crawler settings */}
         <Card className="bg-card border-border">
           <CardHeader>
-            <CardTitle className="text-base">Настройки парсинга</CardTitle>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Settings className="w-4 h-4 text-primary" />
+              Настройки парсинга
+            </CardTitle>
             <CardDescription>
               Укажите <code className="bg-[rgba(0,48,182,0.2)] text-[hsl(216.7,85.9%,41.8%)] border-blue-800/50 border rounded-md p-1">теги</code>
               , <code className="bg-primary/20 text-primary border-primary/30 border rounded-md p-1">.классы</code>
@@ -231,27 +239,70 @@ export default function SettingsPage() {
               <Palette className="w-4 h-4 text-primary" />
               Внешний вид
             </CardTitle>
-            <CardDescription>Цвет виджета на сайте</CardDescription>
+            <CardDescription className="text-md">Цвет виджета на сайте</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+              {/* Основной цвет */}
+              <ColorField
+                label="Основной цвет (акцент)"
+                value={form.accentColor || "#01696f"}
+                placeholder="#01696f"
+                onChange={(v) => set("accentColor", v)}
+              />
+
+              {/* Фон окна чата */}
+              <ColorField
+                label="Фон диалогового окна"
+                value={form.chatBgColor || "#f8f8f8"}
+                placeholder="#f8f8f8"
+                onChange={(v) => set("chatBgColor", v)}
+              />
+            </div>
+
+            {/* Сообщения пользователя */}
             <div>
-              <Label className="text-xs text-muted-foreground mb-1.5 block">Основной цвет</Label>
-              <div className="flex items-center gap-3">
-                <input
-                  data-testid="input-accent-color"
-                  type="color"
-                  value={form.accentColor || "#01696f"}
-                  onChange={e => set("accentColor", e.target.value)}
-                  className="w-10 h-10 rounded cursor-pointer border border-border bg-transparent"
-                />
-                <Input
-                  value={form.accentColor || "#01696f"}
-                  onChange={e => set("accentColor", e.target.value)}
+              <CardDescription className="text-md pb-2">Сообщения пользователя</CardDescription>
+
+              <div className="grid grid-cols-2 gap-4">
+                <ColorField
+                  label="Фон сообщения"
+                  value={form.userBubbleBg || "#01696f"}
                   placeholder="#01696f"
-                  className="w-36 bg-muted border-border text-foreground"
+                  onChange={(v) => set("userBubbleBg", v)}
                 />
-                <Button
-                  onClick={openChat}
+                <ColorField
+                  label="Цвет текста"
+                  value={form.userTextColor || "#ffffff"}
+                  placeholder="#ffffff"
+                  onChange={(v) => set("userTextColor", v)}
+                />
+              </div>
+            </div>
+
+            {/* Сообщения бота */}
+            <div>
+              <CardDescription className="text-md pb-2">Сообщения бота</CardDescription>
+              <div className="grid grid-cols-2 gap-4">
+                <ColorField
+                  label="Фон сообщения"
+                  value={form.botBubbleBg || "#ffffff"}
+                  placeholder="#ffffff"
+                  onChange={(v) => set("botBubbleBg", v)}
+                />
+                <ColorField
+                  label="Цвет текста"
+                  value={form.botTextColor || "#222222"}
+                  placeholder="#222222"
+                  onChange={(v) => set("botTextColor", v)}
+                />
+              </div>
+            </div>
+            
+
+            {/* Предпросмотр */}
+            <Button
+                  onClick={() => openChat(form)}
                   className="bg-primary hover:bg-primary/90 gap-2"
                   style={{ background: form.accentColor || "#01696f" }}
                   title="Открыть тестовый чат"
@@ -259,44 +310,6 @@ export default function SettingsPage() {
                   <Play className="w-3.5 h-3.5" />
                   Предпросмотр
                 </Button>
-              </div>
-            </div>
-            <div className="mt-3">
-              <Label className="text-xs text-muted-foreground mb-1.5 block">Фон диалогового окна</Label>
-              <div className="flex items-center gap-3">
-                <input
-                  data-testid="input-chat-bg-color"
-                  type="color"
-                  value={form.chatBgColor || "#f8f9fb"}
-                  onChange={e => set("chatBgColor", e.target.value)}
-                  className="w-10 h-10 rounded cursor-pointer border border-border bg-transparent"
-                />
-                <Input
-                  value={form.chatBgColor || "#f8f9fb"}
-                  onChange={e => set("chatBgColor", e.target.value)}
-                  placeholder="#f8f9fb"
-                  className="w-36 bg-muted border-border text-foreground"
-                />
-                <span className="text-xs text-muted-foreground">Фон зоны сообщений</span>
-              </div>
-              <div className="mt-3">
-                <Label className="text-xs text-muted-foreground mb-1.5 block">Цвет текста сообщений</Label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="color"
-                    value={form.textColor || "#222222"}
-                    onChange={e => set("textColor", e.target.value)}
-                    className="w-10 h-10 rounded cursor-pointer border border-border bg-transparent"
-                  />
-                  <Input
-                    value={form.textColor || "#222222"}
-                    onChange={e => set("textColor", e.target.value)}
-                    placeholder="#222222"
-                    className="w-36 bg-muted border-border text-foreground"
-                  />
-                </div>
-              </div>
-            </div>
           </CardContent>
         </Card>
 
@@ -305,7 +318,7 @@ export default function SettingsPage() {
           data-testid="button-save-settings"
           onClick={() => update.mutate(form)}
           disabled={update.isPending}
-          className="w-full bg-primary hover:bg-primary/90 gap-2"
+          className="w-full bg-[#01696f] hover:bg-[#01696f]/90 gap-2"
         >
           <Save className="w-4 h-4" />
           {update.isPending ? "Сохранение..." : "Сохранить настройки"}

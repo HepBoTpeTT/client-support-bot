@@ -3,8 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { X, Send, Bot, User, MessageSquare, Loader2, Trash2 } from "lucide-react";
+import { X, Send, Bot, User, Loader2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { ChatPreviewSettings } from "@/App";
 
 interface Message {
   role: "user" | "bot";
@@ -14,43 +15,71 @@ interface Message {
 }
 
 interface SettingsData {
-  botName: string;
-  welcomeMessage: string;
-  accentColor: string;
+  botName?: string;
+  welcomeMessage?: string;
+  accentColor?: string;
+  chatBgColor?: string;
+  userBubbleBg?: string;
+  userTextColor?: string;
+  botBubbleBg?: string;
+  botTextColor?: string;
+  crawlerSettings?: string;
 }
 
 interface TestChatPanelProps {
   open: boolean;
   onClose: () => void;
+  previewSettings?: ChatPreviewSettings | null;
 }
 
-export default function TestChatPanel({ open, onClose }: TestChatPanelProps) {
+export default function TestChatPanel({
+  open,
+  onClose,
+  previewSettings,
+}: TestChatPanelProps) {
   const { data: settings, refetch: refetchSettings } = useQuery<SettingsData>({
     queryKey: ["/api/settings"],
     staleTime: 0,
     refetchOnMount: "always",
   });
-  const botName = settings?.botName || "Помощник";
-  const accentColor = settings?.accentColor || "#01696f";
-  const welcomeMessage = settings?.welcomeMessage || "Привет! Чем могу помочь?";
 
-  // Re-fetch settings every time panel opens
+  const botName =
+    previewSettings?.botName || settings?.botName || "Помощник";
+  const accentColor =
+    previewSettings?.accentColor || settings?.accentColor || "#01696f";
+  const welcomeMessage =
+    previewSettings?.welcomeMessage || settings?.welcomeMessage || "Привет! Чем могу помочь?";
+  const chatBgColor =
+    previewSettings?.chatBgColor || settings?.chatBgColor || "#f8f9fb";
+  const userBubbleBg =
+    previewSettings?.userBubbleBg || settings?.userBubbleBg || "#01696f";
+  const userTextColor =
+    previewSettings?.userTextColor || settings?.userTextColor || "#ffffff";
+  const botBubbleBg =
+    previewSettings?.botBubbleBg || settings?.botBubbleBg || "#ffffff";
+  const botTextColor =
+    previewSettings?.botTextColor || settings?.botTextColor || "#222222";
+
   useEffect(() => {
-    if (open) refetchSettings();
-  }, [open]);
+    if (open) {
+      refetchSettings();
+    }
+  }, [open, refetchSettings]);
 
-  const sessionId = useRef<string>(`test-${Date.now()}`);
+  const sessionId = useRef(`test-${Date.now()}`);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  // Add welcome message when panel opens
   useEffect(() => {
-    if (open && messages.length === 0) {
+    if (open) {
       setMessages([{ role: "bot", text: welcomeMessage }]);
+      setInput("");
+      setLoading(false);
+      sessionId.current = `test-${Date.now()}`;
     }
-  }, [open]);
+  }, [open, welcomeMessage]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -59,37 +88,55 @@ export default function TestChatPanel({ open, onClose }: TestChatPanelProps) {
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || loading) return;
-    setInput("");
 
-    setMessages(prev => [...prev, { role: "user", text }]);
+    setInput("");
+    setMessages((prev) => [...prev, { role: "user", text }]);
     setLoading(true);
-    setMessages(prev => [...prev, { role: "bot", text: "", loading: true }]);
+    setMessages((prev) => [...prev, { role: "bot", text: "", loading: true }]);
 
     try {
       const res = await apiRequest("POST", "/api/chat", {
         message: text,
         session_id: sessionId.current,
       });
+
       const data = await res.json();
-      setMessages(prev => {
+
+      setMessages((prev) => {
         const copy = [...prev];
-        const loadingIdx = copy.findLastIndex(m => m.loading);
+        const loadingIdx = copy.findLastIndex((m) => m.loading);
+
         if (loadingIdx !== -1) {
           if (!res.ok) {
-            // Show full error detail in admin test chat
             const errText = data.detail || data.error || `HTTP ${res.status}`;
-            copy[loadingIdx] = { role: "bot", text: `⚠️ ${errText}`, isError: true };
+            copy[loadingIdx] = {
+              role: "bot",
+              text: `⚠️ ${errText}`,
+              isError: true,
+            };
           } else {
-            copy[loadingIdx] = { role: "bot", text: data.reply || data.response || "..." };
+            copy[loadingIdx] = {
+              role: "bot",
+              text: data.reply || data.response || "...",
+            };
           }
         }
+
         return copy;
       });
     } catch (e: any) {
-      setMessages(prev => {
+      setMessages((prev) => {
         const copy = [...prev];
-        const loadingIdx = copy.findLastIndex(m => m.loading);
-        if (loadingIdx !== -1) copy[loadingIdx] = { role: "bot", text: `⚠️ Ошибка соединения: ${e?.message || e}`, isError: true };
+        const loadingIdx = copy.findLastIndex((m) => m.loading);
+
+        if (loadingIdx !== -1) {
+          copy[loadingIdx] = {
+            role: "bot",
+            text: `⚠️ Ошибка соединения: ${e?.message || e}`,
+            isError: true,
+          };
+        }
+
         return copy;
       });
     } finally {
@@ -100,11 +147,11 @@ export default function TestChatPanel({ open, onClose }: TestChatPanelProps) {
   const clearChat = () => {
     sessionId.current = `test-${Date.now()}`;
     setMessages([{ role: "bot", text: welcomeMessage }]);
+    setInput("");
   };
 
   return (
     <>
-      {/* Backdrop */}
       <div
         className={cn(
           "fixed inset-0 z-40 bg-black/30 transition-opacity duration-300",
@@ -113,108 +160,144 @@ export default function TestChatPanel({ open, onClose }: TestChatPanelProps) {
         onClick={onClose}
       />
 
-      {/* Slide-in panel */}
       <div
         className={cn(
-          "fixed top-0 right-0 h-full w-96 z-50 flex flex-col shadow-2xl transition-transform duration-300 ease-in-out",
-          "bg-card border-l border-border",
+          "fixed top-0 right-0 z-50 flex h-full w-96 flex-col bg-card shadow-2xl transition-transform duration-300 ease-in-out",
           open ? "translate-x-0" : "translate-x-full"
         )}
       >
-        {/* Header */}
         <div
-          className="flex items-center justify-between px-4 py-3 text-white flex-shrink-0"
+          className="flex items-center justify-between px-4 py-3 text-white"
           style={{ background: accentColor }}
         >
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
-              <Bot className="w-4 h-4" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20">
+              <Bot className="h-4 w-4" />
             </div>
             <div>
               <div className="text-sm font-semibold">{botName}</div>
               <div className="text-xs opacity-75">Тестовый режим</div>
             </div>
           </div>
+
           <div className="flex items-center gap-1">
             <button
               onClick={clearChat}
-              className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/20 transition-colors"
-              title="Очистить диалог"
+              className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-white/20"
+              title="Очистить чат"
+              type="button"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="h-4 w-4" />
             </button>
+
             <button
               onClick={onClose}
-              className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/20 transition-colors"
+              className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-white/20"
+              title="Закрыть"
+              type="button"
             >
-              <X className="w-4 h-4" />
+              <X className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        {/* Notice */}
-        <div className="px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 flex-shrink-0">
-          <p className="text-xs text-yellow-700 dark:text-yellow-400">
-            Тестовый чат — отвечает на основе реальной базы знаний
-          </p>
-        </div>
+        <div
+          className="flex-1 overflow-y-auto p-4 space-y-3"
+          style={{ backgroundColor: chatBgColor }}
+        >
+          {messages.map((msg, i) => {
+            const isUser = msg.role === "user";
+            const isBot = msg.role === "bot" && !msg.isError;
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={cn("flex gap-2", msg.role === "user" ? "justify-end" : "justify-start")}
-            >
-              {msg.role === "bot" && (
-                <div
-                  className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
-                  style={{ background: accentColor }}
-                >
-                  <Bot className="w-3.5 h-3.5 text-white" />
-                </div>
-              )}
+            return (
               <div
+                key={i}
                 className={cn(
-                  "max-w-[78%] rounded-2xl px-3 py-2 text-sm leading-relaxed",
-                  msg.role === "user"
-                    ? "text-white rounded-tr-sm"
-                    : msg.isError
-                      ? "bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-tl-sm font-mono text-xs"
-                      : "bg-muted text-foreground rounded-tl-sm"
+                  "flex gap-2",
+                  isUser ? "justify-end" : "justify-start"
                 )}
-                style={msg.role === "user" ? { background: accentColor } : undefined}
               >
-                {msg.loading ? (
-                  <span className="flex items-center gap-1.5 text-muted-foreground">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    Печатает...
-                  </span>
-                ) : (
-                  msg.text
+                {msg.role === "bot" && (
+                  <div
+                    className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full"
+                    style={{ background: accentColor }}
+                  >
+                    <Bot className="h-3.5 w-3.5 text-white" />
+                  </div>
+                )}
+
+                <div
+                  className={cn(
+                    "max-w-[78%] rounded-2xl px-3 py-2 text-sm leading-relaxed break-words",
+                    isUser && "rounded-tr-sm",
+                    isBot && "rounded-tl-sm",
+                    msg.isError &&
+                      "rounded-tl-sm border border-red-200 bg-red-50 font-mono text-xs text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-400"
+                  )}
+                  style={
+                    isUser
+                      ? {
+                          background: userBubbleBg,
+                          color: userTextColor,
+                        }
+                      : isBot
+                        ? {
+                            background: botBubbleBg,
+                            color: botTextColor,
+                          }
+                        : undefined
+                  }
+                >
+                  {msg.loading ? (
+                    <span
+                      className="flex items-center gap-1.5"
+                      style={{ color: botTextColor }}
+                    >
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Печатает...
+                    </span>
+                  ) : (
+                    msg.text
+                  )}
+                </div>
+
+                {msg.role === "user" && (
+                  <div
+                    className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border"
+                    style={{
+                      background: userBubbleBg,
+                      borderColor: userBubbleBg,
+                    }}
+                  >
+                    <User
+                      className="h-3.5 w-3.5"
+                      style={{ color: userTextColor }}
+                    />
+                  </div>
                 )}
               </div>
-              {msg.role === "user" && (
-                <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <User className="w-3.5 h-3.5 text-muted-foreground" />
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
+
           <div ref={bottomRef} />
         </div>
 
-        {/* Input */}
-        <div className="p-3 border-t border-border flex-shrink-0">
+        <div className="border-t border-border p-3">
           <div className="flex gap-2">
             <Input
               value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendMessage()}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
               placeholder="Введите вопрос..."
               disabled={loading}
-              className="bg-muted border-border text-foreground placeholder:text-muted-foreground text-sm"
+              className="border-border bg-muted text-sm text-foreground placeholder:text-muted-foreground"
             />
+
             <Button
               onClick={sendMessage}
               disabled={!input.trim() || loading}
@@ -223,9 +306,9 @@ export default function TestChatPanel({ open, onClose }: TestChatPanelProps) {
               style={{ background: accentColor }}
             >
               {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Send className="w-4 h-4" />
+                <Send className="h-4 w-4" />
               )}
             </Button>
           </div>

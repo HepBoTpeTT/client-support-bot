@@ -3,8 +3,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { copyToClipboard } from "@/lib/copyToClipboard";
 import { Code2, Copy, Check, FileCode, Globe } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface EmbedCode {
   jsSnippet: string;
@@ -15,20 +16,45 @@ function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
 
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
   const copy = async () => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    toast({ title: "Скопировано в буфер обмена" });
-    setTimeout(() => setCopied(false), 2000);
+    const ok = await copyToClipboard(text);
+
+    if (ok) {
+      setCopied(true);
+      toast({ title: "Скопировано в буфер обмена" });
+      return;
+    }
+
+    toast({
+      title: "Не удалось скопировать",
+      description: "Скопируйте код вручную",
+      variant: "destructive",
+    });
   };
 
   return (
-    <Button variant="ghost" size="sm" onClick={copy} className="gap-2 text-muted-foreground hover:text-foreground">
-      {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={copy}
+      className="gap-2 text-muted-foreground hover:text-foreground"
+    >
+      {copied ? (
+        <Check className="w-4 h-4 text-green-400" />
+      ) : (
+        <Copy className="w-4 h-4" />
+      )}
       {copied ? "Скопировано" : "Копировать"}
     </Button>
   );
 }
+
 
 export default function EmbedPage() {
   const { data: embed, isLoading } = useQuery<EmbedCode>({

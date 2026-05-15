@@ -168,14 +168,14 @@
         }
         .sa-msg.user {
         align-self: flex-end;
-        background: var(--accent, #01696f);
-        color: #fff;
+        background: var(--user-bubble-bg, #01696f);
+        color: var(--user-text-color, #ffffff);
         border-bottom-right-radius: 4px;
         }
         .sa-msg.bot {
         align-self: flex-start;
-        background: #fff;
-        color: var(--text-color, #222);
+        background: var(--bot-bubble-bg, #ffffff);
+        color: var(--bot-text-color, #222222);
         border-bottom-left-radius: 4px;
         box-shadow: 0 1px 4px rgba(0,0,0,0.08);
         }
@@ -386,11 +386,14 @@
         var headerStatus = document.getElementById('sa-header-status');
         var avatar       = document.getElementById('sa-avatar');
 
-        function applyTheme(accent, chatBg, textColor) {
+        function applyTheme(accent, chatBg, userBubbleBg, userTextColor, botBubbleBg, botTextColor) {
             var d = document.documentElement;
             d.style.setProperty('--accent',     accent    || '#01696f');
             d.style.setProperty('--chat-bg',    chatBg    || '#f8f9fb');
-            d.style.setProperty('--text-color', textColor || '#222222');
+            d.style.setProperty('--bot-text-color', botTextColor || '#222222');
+            d.style.setProperty('--user-text-color', userTextColor || '#ffffff');
+            d.style.setProperty('--bot-bubble-bg', botBubbleBg || '#ffffff');
+            d.style.setProperty('--user-bubble-bg', userBubbleBg || '#01696f');
             document.getElementById('sa-header').style.background = accent || '#01696f';
         }
 
@@ -544,7 +547,7 @@
             var cfg = await r.json();
 
             botName = cfg.bot_name || 'Помощник';
-            applyTheme(cfg.accent_color, cfg.chat_bg_color, cfg.text_color);
+            applyTheme(cfg.accent_color, cfg.chat_bg_color, cfg.user_bubble_bg, cfg.user_text_color, cfg.bot_bubble_bg, cfg.bot_text_color);
             headerName.textContent = botName;
 
             loading.style.display = 'none';

@@ -1,6 +1,6 @@
 from datetime import datetime
 from sqlalchemy import (
-    Integer, String, Text, DateTime, ForeignKey, func
+    Integer, String, Text, DateTime, ForeignKey, func, Index
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database import Base
@@ -12,14 +12,17 @@ class Settings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     openai_key: Mapped[str] = mapped_column(Text, default="")
     crawler_settings: Mapped[str] = mapped_column(Text, default="script style noscript svg iframe nav header footer aside button form input select")
-    bot_name: Mapped[str] = mapped_column(String(255), default="Помощник")
-    welcome_message: Mapped[str] = mapped_column(Text, default="Привет! Чем могу помочь?")
-    accent_color: Mapped[str] = mapped_column(String(32), default="#01696f")
     language: Mapped[str] = mapped_column(String(16), default="ru")
     target_url: Mapped[str] = mapped_column(Text, default="")
     model: Mapped[str] = mapped_column(String(64), default="gpt-4o")
+    bot_name: Mapped[str] = mapped_column(String(255), default="Помощник")
+    welcome_message: Mapped[str] = mapped_column(Text, default="Привет! Чем могу помочь?")
+    accent_color: Mapped[str] = mapped_column(String(32), default="#01696f")
     chat_bg_color: Mapped[str] = mapped_column(String(32), default="#f8f9fb")
-    text_color: Mapped[str] = mapped_column(String(32), default="#222222")
+    user_bubble_bg: Mapped[str] = mapped_column(String(32), default="#01696f")
+    user_text_color: Mapped[str] = mapped_column(String(32), default="#ffffff")
+    bot_bubble_bg: Mapped[str] = mapped_column(String(32), default="#ffffff")
+    bot_text_color: Mapped[str] = mapped_column(String(32), default="#222222")
 
 
 class CrawlSession(Base):
@@ -63,11 +66,16 @@ class Chunk(Base):
 
 class Dialog(Base):
     __tablename__ = "dialogs"
+    __table_args__ = (
+        Index("ix_dialogs_session_created", "session_id", "created_at"),
+        Index("ix_dialogs_event_type_created", "event_type", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(String(128))
-    role: Mapped[str] = mapped_column(String(16))  # user | assistant
-    content: Mapped[str] = mapped_column(Text)
+    role: Mapped[str] = mapped_column(String(16), default="user")  # user | assistant | operator | system
+    event_type: Mapped[str] = mapped_column(String(32), default="message")
+    content: Mapped[str] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
 
 

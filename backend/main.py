@@ -4,7 +4,7 @@ import threading
 import time
 import traceback
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
@@ -13,8 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
-from pydantic import BaseModel
-from sqlalchemy import func, desc, text
+from pydantic import BaseModel, ConfigDict
+from pydantic.alias_generators import to_camel
+from sqlalchemy import func, desc, text, and_, or_
 from sqlalchemy.orm import Session
 from urllib.parse import quote
 
@@ -23,8 +24,8 @@ from crawler import crawl_site, search_chunks
 from database import get_db, init_db, SessionLocal, engine
 from models import (
     Settings as SettingsModel, Page, Chunk, Dialog,
-    CrawlSession, OperatorSession, OperatorMessage,
-    Achievement, DailyTask,
+    CrawlSession, Achievement, DailyTask,
+    # OperatorSession, OperatorMessage,
 )
 from qdrant_store import search_similar, clear_collection
 
@@ -78,7 +79,7 @@ async def lifespan(app: FastAPI):
         for s in stale:
             s.status = "error"
             s.error_message = "Бэкенд был перезапущен во время парсинга"
-            s.finished_at = datetime.now()
+            s.finished_at = datetime.now(timezone.utc)
         if stale:
             _db.commit()
             logger.warning(f"Сброшено {len(stale)} зависших сессий парсинга")
@@ -86,30 +87,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Ошибка при очистке сессий: {e}")
 
-    # Start background thread: auto-clean inactive chat sessions every 15 min
-    def _auto_clean_dialogs():
-        while True:
-            time.sleep(900)  # 15 minutes
-            try:
-                _db2 = SessionLocal()
-                cutoff = datetime.now() - timedelta(hours=1)
-                # Find session_ids with last message older than 1h
-                old_sessions = (
-                    _db2.query(Dialog.session_id)
-                    .group_by(Dialog.session_id)
-                    .having(func.max(Dialog.created_at) < cutoff)
-                    .all()
-                )
-                if old_sessions:
-                    ids = [r[0] for r in old_sessions]
-                    _db2.query(Dialog).filter(Dialog.session_id.in_(ids)).delete(synchronize_session=False)
-                    _db2.commit()
-                    logger.info(f"Авто-очистка: удалено {len(ids)} неактивных сессий чата")
-                _db2.close()
-            except Exception as ex:
-                logger.error(f"auto_clean_dialogs error: {ex}")
-
-    threading.Thread(target=_auto_clean_dialogs, daemon=True).start()
     yield
 
 
@@ -132,28 +109,42 @@ app.add_middleware(
 )
 
 # ──────────────────────────────────────────────────────────
-# Pydantic schemas
+# Сonstants
 # ──────────────────────────────────────────────────────────
 
-class SettingsUpdate(BaseModel):
-    # snake_case (direct)
-    openai_key: Optional[str] = None
-    bot_name: Optional[str] = None
-    welcome_message: Optional[str] = None
-    accent_color: Optional[str] = None
-    language: Optional[str] = None
-    target_url: Optional[str] = None
-    model: Optional[str] = None
-    crawler_settings: Optional[str] = None
-    # camelCase (from frontend)
-    openaiKey: Optional[str] = None
-    botName: Optional[str] = None
-    welcomeMessage: Optional[str] = None
-    accentColor: Optional[str] = None
-    targetUrl: Optional[str] = None
-    chatBgColor: Optional[str] = None
-    textColor: Optional[str] = None
-    crawlerSettings: Optional[str] = None
+ROLE_USER = "user"
+ROLE_ASSISTANT = "assistant"
+ROLE_OPERATOR = "operator"
+ROLE_SYSTEM = "system"
+
+EVENT_MESSAGE = "message"
+EVENT_HANDOFF_REQUESTED = "handoff_requested"
+EVENT_HANDOFF_CLOSED = "handoff_closed"
+EVENT_HANDOFF_REOPENED = "handoff_reopened"
+
+# ──────────────────────────────────────────────────────────
+# Pydantic schemas
+# ──────────────────────────────────────────────────────────
+class CamelModel(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
+class SettingsUpdate(CamelModel):
+    openai_key: str | None = None
+    bot_name: str | None = None
+    welcome_message: str | None = None
+    accent_color: str | None = None
+    language: str | None = None
+    target_url: str | None = None
+    model: str | None = None
+    crawler_settings: str | None = None
+    chat_bg_color: str | None = None
+    user_bubble_bg: str | None = None
+    user_text_color: str | None = None
+    bot_bubble_bg: str | None = None
+    bot_text_color: str | None = None
 
 
 class CrawlStartRequest(BaseModel):
@@ -185,9 +176,12 @@ def settings_to_dict(s: SettingsModel, mask: bool = True) -> dict:
         "language": s.language,
         "targetUrl": s.target_url,
         "model": s.model,
+        "crawlerSettings": s.crawler_settings,
         "chatBgColor": getattr(s, "chat_bg_color", "#f8f9fb") or "#f8f9fb",
-        "textColor": getattr(s, "text_color", "#222222") or "#222222",
-        "crawlerSettings": s.crawler_settings
+        "userBubbleBg": getattr(s, "user_bubble_bg", "#01696f") or "#01696f",
+        "userTextColor": getattr(s, "user_text_color", "#ffffff") or "#ffffff",
+        "botBubbleBg": getattr(s, "bot_bubble_bg", "#ffffff") or "#ffffff",
+        "botTextColor": getattr(s, "bot_text_color", "#222222") or "#222222",
     }
 
 
@@ -207,34 +201,11 @@ def update_settings(data: SettingsUpdate, db: Session = Depends(get_db)):
 
     update_data = data.model_dump(exclude_none=True)
 
-    # Map both camelCase and snake_case keys to model fields
-    field_map = {
-        "openai_key": "openai_key",
-        "openaiKey": "openai_key",
-        "bot_name": "bot_name",
-        "botName": "bot_name",
-        "welcome_message": "welcome_message",
-        "welcomeMessage": "welcome_message",
-        "accent_color": "accent_color",
-        "accentColor": "accent_color",
-        "language": "language",
-        "target_url": "target_url",
-        "targetUrl": "target_url",
-        "model": "model",
-        "chat_bg_color": "chat_bg_color",
-        "chatBgColor": "chat_bg_color",
-        "textColor": "text_color",
-        "text_color": "text_color",
-        "crawlerSettings": "crawler_settings",
-        "crawler_settings": "crawler_settings"
-    }
+    if "openai_key" in update_data and update_data["openai_key"].startswith("••••"):
+        update_data.pop("openai_key")
 
     for field, value in update_data.items():
-        # Don't overwrite with masked value
-        if field in ("openai_key", "openaiKey") and value.startswith("••••"):
-            continue
-        if field in field_map:
-            setattr(s, field_map[field], value)
+        setattr(s, field, value)
 
     db.commit()
     db.refresh(s)
@@ -259,7 +230,7 @@ async def start_crawl(
         status="running",
         pages_found=0,
         pages_done=0,
-        started_at=datetime.now(),
+        started_at=datetime.now(timezone.utc),
     )
     db.add(session)
     db.commit()
@@ -283,7 +254,7 @@ async def start_crawl(
             if sess:
                 sess.status = "error"
                 sess.error_message = str(e)
-                sess.finished_at = datetime.now()
+                sess.finished_at = datetime.now(timezone.utc)
                 crawl_db.commit()
         finally:
             crawl_db.close()
@@ -419,20 +390,27 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
     if not s or not s.openai_key:
         raise HTTPException(status_code=400, detail="OpenAI API ключ не настроен. Обратитесь к администратору.")
 
-    # Get history BEFORE saving current message
     history = (
         db.query(Dialog)
-        .filter(Dialog.session_id == req.session_id)
-        .order_by(Dialog.created_at.asc())
+        .filter(
+            Dialog.session_id == req.session_id,
+            Dialog.event_type == EVENT_MESSAGE,
+            Dialog.role.in_([ROLE_USER, ROLE_ASSISTANT]),
+        )
+        .order_by(Dialog.created_at.asc(), Dialog.id.asc())
         .limit(8)
         .all()
     )
 
-    # Save user message
-    db.add(Dialog(session_id=req.session_id, role="user", content=req.message, created_at=datetime.now()))
+    db.add(Dialog(
+        session_id=req.session_id,
+        role=ROLE_USER,
+        event_type=EVENT_MESSAGE,
+        content=req.message,
+        created_at=datetime.now(timezone.utc),
+    ))
     db.commit()
 
-    # RAG: first try Qdrant, fallback to MySQL
     relevant_chunks = []
     retrieval_backend = "none"
 
@@ -511,11 +489,17 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
         reply = completion.choices[0].message.content or "Извините, не могу ответить прямо сейчас."
     except Exception as e:
         logger.error(f"OpenAI error: {traceback.format_exc()}")
+        reply = "Извините, сейчас временно не удаётся получить ответ. Попробуйте ещё раз чуть позже."
         raise HTTPException(status_code=500, detail=f"OpenAI ошибка: {str(e)}")
 
-    # Save assistant reply
-    db.add(Dialog(session_id=req.session_id, role="assistant", content=reply, created_at=datetime.now()))
-    db.commit()
+    finally:
+        db.add(Dialog(
+            session_id=req.session_id,
+            role="assistant",
+            content=reply,
+            created_at=datetime.now(timezone.utc),
+        ))
+        db.commit()
 
     return {
         "reply": reply,
@@ -523,14 +507,36 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
         "retrievalBackend": retrieval_backend,
     }
 
-
 # ──────────────────────────────────────────────────────────
 # Dialogs
 # ──────────────────────────────────────────────────────────
 
+def dialog_preview_text(d: Dialog | None) -> str:
+    if not d:
+        return ""
+
+    if d.event_type == "handoff_requested":
+        return "Запрошен оператор"
+
+    if d.event_type == "handoff_closed":
+        return "Обращение закрыто"
+
+    if d.event_type == "handoff_reopened":
+        return "Обращение открыто повторно"
+
+    if d.event_type == "message":
+        if d.role == "operator":
+            return f"Оператор: {(d.content or '').strip()[:100]}"
+        if d.role == "assistant":
+            return f"Бот: {(d.content or '').strip()[:100]}"
+        if d.role == "user":
+            return (d.content or "").strip()[:100]
+        return (d.content or "").strip()[:100]
+
+    return "Системное событие"
+
 @app.get("/api/dialogs")
 def get_dialog_sessions(db: Session = Depends(get_db)):
-    # Group by session_id, get latest message and count
     rows = (
         db.query(
             Dialog.session_id,
@@ -544,27 +550,31 @@ def get_dialog_sessions(db: Session = Depends(get_db)):
 
     result = []
     for row in rows:
-        last_msg = (
+        last_user_msg = (
             db.query(Dialog)
-            .filter(Dialog.session_id == row.session_id)
-            .order_by(desc(Dialog.created_at))
+            .filter(
+                Dialog.session_id == row.session_id,
+                Dialog.role == ROLE_USER,
+            )
+            .order_by(desc(Dialog.created_at), desc(Dialog.id))
             .first()
         )
+
         result.append({
             "sessionId": row.session_id,
             "count": row.count,
-            "createdAt": row.last_at.isoformat() if row.last_at else None,
-            "lastMessage": last_msg.content[:100] if last_msg else "",
+            "createdAt": last_user_msg.created_at.isoformat() if last_user_msg and last_user_msg.created_at else None,
+            "lastMessage": dialog_preview_text(last_user_msg),
         })
-    return result
 
+    return result
 
 @app.get("/api/dialogs/{session_id}")
 def get_session_dialogs(session_id: str, db: Session = Depends(get_db)):
     dialogs = (
         db.query(Dialog)
         .filter(Dialog.session_id == session_id)
-        .order_by(Dialog.created_at)
+        .order_by(Dialog.created_at, Dialog.id)
         .all()
     )
     return [
@@ -572,12 +582,12 @@ def get_session_dialogs(session_id: str, db: Session = Depends(get_db)):
             "id": d.id,
             "sessionId": d.session_id,
             "role": d.role,
+            "eventType": d.event_type,
             "content": d.content,
             "createdAt": d.created_at.isoformat() if d.created_at else None,
         }
         for d in dialogs
     ]
-
 
 # ──────────────────────────────────────────────────────────
 # Operator handoff
@@ -596,154 +606,368 @@ class UserOperatorMessageRequest(BaseModel):
 @app.post("/api/operator/request")
 def request_operator(req: ChatRequest, db: Session = Depends(get_db)):
     """User requests to be connected to a human operator."""
-    existing = db.query(OperatorSession).filter(OperatorSession.session_id == req.session_id).first()
-    if existing:
-        existing.status = "pending"
-        db.commit()
-        return {"ok": True, "status": "pending"}
 
-    op_session = OperatorSession(
-        session_id=req.session_id,
-        status="pending",
-        created_at=datetime.now(),
+    last_event = (
+        db.query(Dialog)
+        .filter(
+            Dialog.session_id == req.session_id,
+            Dialog.event_type.in_([
+                EVENT_HANDOFF_REQUESTED,
+                EVENT_HANDOFF_CLOSED,
+                EVENT_HANDOFF_REOPENED,
+            ]),
+        )
+        .order_by(desc(Dialog.created_at), desc(Dialog.id))
+        .first()
     )
-    db.add(op_session)
-    # Save user message to operator_messages too
-    if req.message:
-        db.add(OperatorMessage(
+
+    next_event = EVENT_HANDOFF_REOPENED if last_event and last_event.event_type == EVENT_HANDOFF_CLOSED else EVENT_HANDOFF_REQUESTED
+
+    db.add(Dialog(
+        session_id=req.session_id,
+        role=ROLE_SYSTEM,
+        event_type=next_event,
+        content=None,
+        created_at=datetime.now(timezone.utc),
+    ))
+
+    if req.message and req.message.strip():
+        db.add(Dialog(
             session_id=req.session_id,
-            role="user",
-            content=req.message,
-            created_at=datetime.now(),
+            role=ROLE_USER,
+            event_type=EVENT_MESSAGE,
+            content=req.message.strip(),
+            created_at=datetime.now(timezone.utc),
         ))
+
     db.commit()
     return {"ok": True, "status": "pending"}
-
 
 @app.post("/api/operator/user-message")
 def user_operator_message(req: UserOperatorMessageRequest, db: Session = Depends(get_db)):
     """User sends a message while in operator mode."""
-    op = db.query(OperatorSession).filter(OperatorSession.session_id == req.session_id).first()
-    if not op or op.status == "closed":
+    status = get_operator_status(req.session_id, db)
+
+    if status in ("none", "closed"):
         raise HTTPException(status_code=400, detail="Нет активной сессии с оператором")
-    db.add(OperatorMessage(
+
+    db.add(Dialog(
         session_id=req.session_id,
-        role="user",
-        content=req.message,
-        created_at=datetime.now(),
+        role=ROLE_USER,
+        event_type=EVENT_MESSAGE,
+        content=req.message.strip(),
+        created_at=datetime.now(timezone.utc),
     ))
     db.commit()
     return {"ok": True}
 
-
 @app.get("/api/operator/sessions")
 def get_operator_sessions(db: Session = Depends(get_db)):
-    """Admin: list all operator sessions with last message."""
-    sessions = db.query(OperatorSession).order_by(desc(OperatorSession.updated_at)).all()
-    result = []
-    for s in sessions:
-        last_msg = (
-            db.query(OperatorMessage)
-            .filter(OperatorMessage.session_id == s.session_id)
-            .order_by(desc(OperatorMessage.created_at))
-            .first()
-        )
-        unread = (
-            db.query(OperatorMessage)
-            .filter(
-                OperatorMessage.session_id == s.session_id,
-                OperatorMessage.role == "user",
-            )
-            .count()
-        )
-        result.append({
-            "id": s.id,
-            "sessionId": s.session_id,
-            "status": s.status,
-            "createdAt": s.created_at.isoformat() if s.created_at else None,
-            "updatedAt": s.updated_at.isoformat() if s.updated_at else None,
-            "lastMessage": last_msg.content[:120] if last_msg else "",
-            "lastMessageRole": last_msg.role if last_msg else "",
-            "userMessageCount": unread,
-        })
-    return result
+    """Admin: list all operator sessions with computed status and last message."""
+    now_utc = datetime.now(timezone.utc)
+    start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_of_yesterday = start_of_today_utc - timedelta(days=1)
 
+    session_rows = (
+        db.query(
+            Dialog.session_id,
+            func.min(Dialog.created_at).label("created_at"),
+            func.max(Dialog.created_at).label("updated_at"),
+        )
+        .filter(
+            Dialog.session_id.in_(
+                db.query(Dialog.session_id).filter(
+                    Dialog.event_type.in_([
+                        EVENT_HANDOFF_REQUESTED,
+                        EVENT_HANDOFF_REOPENED,
+                        EVENT_HANDOFF_CLOSED,
+                    ])
+                )
+            ),
+            Dialog.created_at >= start_of_yesterday,
+        )
+        .group_by(Dialog.session_id)
+        .order_by(desc("updated_at"))
+        .all()
+    )
+
+    result = []
+    for row in session_rows:
+        status = get_operator_status(row.session_id, db)
+        if status == "none":
+            continue
+
+        last_msg = get_last_dialog_entry(row.session_id, db)
+
+        user_message_count = db.query(Dialog).filter(
+            Dialog.session_id == row.session_id,
+            Dialog.role == ROLE_USER,
+            Dialog.event_type == EVENT_MESSAGE,
+        ).count()
+
+        result.append({
+            "id": row.session_id,
+            "sessionId": row.session_id,
+            "status": status,
+            "createdAt": row.created_at.isoformat() if row.created_at else None,
+            "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
+            "lastMessage": get_operator_preview_text(last_msg),
+            "lastMessageRole": last_msg.role if last_msg else "",
+            "userMessageCount": user_message_count,
+        })
+
+    return result
 
 @app.get("/api/operator/messages/{session_id}")
 def get_operator_messages(session_id: str, db: Session = Depends(get_db)):
-    """Get all operator chat messages for a session."""
+    """Get full operator timeline for a session."""
+    status = get_operator_status(session_id, db)
+    if status == "none":
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+
     msgs = (
-        db.query(OperatorMessage)
-        .filter(OperatorMessage.session_id == session_id)
-        .order_by(OperatorMessage.created_at)
+        db.query(Dialog)
+        .filter(Dialog.session_id == session_id)
+        .order_by(Dialog.created_at.asc(), Dialog.id.asc())
         .all()
     )
+
     return [
         {
             "id": m.id,
             "sessionId": m.session_id,
             "role": m.role,
+            "eventType": m.event_type,
             "content": m.content,
             "createdAt": m.created_at.isoformat() if m.created_at else None,
         }
         for m in msgs
     ]
 
-
 @app.get("/api/operator/poll/{session_id}")
 def poll_operator_messages(session_id: str, last_id: int = 0, db: Session = Depends(get_db)):
     """Widget polling: get new operator messages since last_id."""
-    op = db.query(OperatorSession).filter(OperatorSession.session_id == session_id).first()
-    if not op:
+    status = get_operator_status(session_id, db)
+
+    if status == "none":
         return {"status": "none", "messages": []}
+
     msgs = (
-        db.query(OperatorMessage)
+        db.query(Dialog)
         .filter(
-            OperatorMessage.session_id == session_id,
-            OperatorMessage.id > last_id,
-            OperatorMessage.role == "operator",
+            Dialog.session_id == session_id,
+            Dialog.id > last_id,
+            Dialog.role == ROLE_OPERATOR,
+            Dialog.event_type == EVENT_MESSAGE,
         )
-        .order_by(OperatorMessage.created_at)
+        .order_by(Dialog.created_at.asc(), Dialog.id.asc())
         .all()
     )
+
     return {
-        "status": op.status,
+        "status": status,
         "messages": [
-            {"id": m.id, "content": m.content, "createdAt": m.created_at.isoformat()}
+            {
+                "id": m.id,
+                "content": m.content,
+                "createdAt": m.created_at.isoformat() if m.created_at else None,
+            }
             for m in msgs
         ],
     }
 
-
 @app.post("/api/operator/send")
 def operator_send(req: OperatorSendRequest, db: Session = Depends(get_db)):
     """Admin/operator sends message to user."""
-    op = db.query(OperatorSession).filter(OperatorSession.session_id == req.session_id).first()
-    if not op:
-        raise HTTPException(status_code=404, detail="Сессия не найдена")
-    if op.status == "pending":
-        op.status = "active"
-    op.updated_at = datetime.now()
-    db.add(OperatorMessage(
+
+    if not req.session_id or not req.message.strip():
+        raise HTTPException(status_code=400, detail="session_id и message обязательны")
+
+    has_handoff = db.query(Dialog).filter(
+        Dialog.session_id == req.session_id,
+        Dialog.event_type.in_([
+            EVENT_HANDOFF_REQUESTED,
+            EVENT_HANDOFF_REOPENED,
+            EVENT_HANDOFF_CLOSED,
+        ]),
+    ).count() > 0
+
+    if not has_handoff:
+        raise HTTPException(status_code=404, detail="Сессия оператора не найдена")
+
+    last_event = (
+        db.query(Dialog)
+        .filter(
+            Dialog.session_id == req.session_id,
+            Dialog.event_type.in_([
+                EVENT_HANDOFF_REQUESTED,
+                EVENT_HANDOFF_REOPENED,
+                EVENT_HANDOFF_CLOSED,
+            ]),
+        )
+        .order_by(desc(Dialog.created_at), desc(Dialog.id))
+        .first()
+    )
+
+    if last_event and last_event.event_type == EVENT_HANDOFF_CLOSED:
+        db.add(Dialog(
+            session_id=req.session_id,
+            role=ROLE_SYSTEM,
+            event_type=EVENT_HANDOFF_REOPENED,
+            content=None,
+            created_at=datetime.now(timezone.utc),
+        ))
+
+    db.add(Dialog(
         session_id=req.session_id,
-        role="operator",
-        content=req.message,
-        created_at=datetime.now(),
+        role=ROLE_OPERATOR,
+        event_type=EVENT_MESSAGE,
+        content=req.message.strip(),
+        created_at=datetime.now(timezone.utc),
     ))
     db.commit()
-    return {"ok": True}
 
+    return {"ok": True}
 
 @app.patch("/api/operator/sessions/{session_id}")
 def update_operator_session(session_id: str, db: Session = Depends(get_db)):
-    """Close/reopen an operator session."""
-    op = db.query(OperatorSession).filter(OperatorSession.session_id == session_id).first()
-    if not op:
+    """Close/reopen an operator session via Dialog events."""
+    status = get_operator_status(session_id, db)
+
+    if status == "none":
         raise HTTPException(status_code=404, detail="Сессия не найдена")
-    op.status = "closed" if op.status != "closed" else "active"
-    op.updated_at = datetime.now()
+
+    if status == "closed":
+        next_event = EVENT_HANDOFF_REOPENED
+        next_status = "pending"
+    else:
+        next_event = EVENT_HANDOFF_CLOSED
+        next_status = "closed"
+
+    db.add(Dialog(
+        session_id=session_id,
+        role=ROLE_SYSTEM,
+        event_type=next_event,
+        content=None,
+        created_at=datetime.now(timezone.utc),
+    ))
     db.commit()
-    return {"ok": True, "status": op.status}
+
+    return {"ok": True, "status": next_status}
+
+# ──────────────────────────────────────────────────────────
+# Operator helpers
+# ──────────────────────────────────────────────────────────
+
+
+def get_operator_status(session_id: str, db: Session) -> str:
+    last_start_event = (
+        db.query(Dialog)
+        .filter(
+            Dialog.session_id == session_id,
+            Dialog.event_type.in_([EVENT_HANDOFF_REQUESTED, EVENT_HANDOFF_REOPENED]),
+        )
+        .order_by(desc(Dialog.created_at), desc(Dialog.id))
+        .first()
+    )
+
+    if not last_start_event:
+        return "none"
+
+    has_close = db.query(Dialog).filter(
+        Dialog.session_id == session_id,
+        Dialog.event_type == EVENT_HANDOFF_CLOSED,
+        happened_after(last_start_event),
+    ).count() > 0
+
+    if has_close:
+        return "closed"
+
+    has_operator_reply = db.query(Dialog).filter(
+        Dialog.session_id == session_id,
+        Dialog.role == ROLE_OPERATOR,
+        Dialog.event_type == EVENT_MESSAGE,
+        happened_after(last_start_event),
+    ).count() > 0
+
+    return "active" if has_operator_reply else "pending"
+
+def get_last_operator_message(session_id: str, db: Session) -> Dialog | None:
+    return (
+        db.query(Dialog)
+        .filter(Dialog.session_id == session_id)
+        .order_by(desc(Dialog.created_at), desc(Dialog.id))
+        .first()
+    )
+
+def happened_after(row: Dialog):
+    return or_(
+        Dialog.created_at > row.created_at,
+        and_(Dialog.created_at == row.created_at, Dialog.id > row.id),
+    )
+
+def get_last_handoff_start(session_id: str, db: Session) -> Dialog | None:
+    return (
+        db.query(Dialog)
+        .filter(
+            Dialog.session_id == session_id,
+            Dialog.event_type.in_([EVENT_HANDOFF_REQUESTED, EVENT_HANDOFF_REOPENED]),
+        )
+        .order_by(desc(Dialog.created_at), desc(Dialog.id))
+        .first()
+    )
+
+def get_operator_status(session_id: str, db: Session) -> str:
+    last_start = get_last_handoff_start(session_id, db)
+    if not last_start:
+        return "none"
+
+    has_close = db.query(Dialog).filter(
+        Dialog.session_id == session_id,
+        Dialog.event_type == EVENT_HANDOFF_CLOSED,
+        happened_after(last_start),
+    ).count() > 0
+
+    if has_close:
+        return "closed"
+
+    has_operator_reply = db.query(Dialog).filter(
+        Dialog.session_id == session_id,
+        Dialog.role == ROLE_OPERATOR,
+        Dialog.event_type == EVENT_MESSAGE,
+        happened_after(last_start),
+    ).count() > 0
+
+    return "active" if has_operator_reply else "pending"
+
+def get_last_dialog_entry(session_id: str, db: Session) -> Dialog | None:
+    return (
+        db.query(Dialog)
+        .filter(
+            Dialog.session_id == session_id,
+            Dialog.role == ROLE_USER,
+            )
+        .order_by(desc(Dialog.created_at), desc(Dialog.id))
+        .first()
+    )
+
+def get_operator_preview_text(d: Dialog | None) -> str:
+    if not d:
+        return ""
+
+    if d.event_type == EVENT_HANDOFF_REQUESTED:
+        return "Запрошен оператор"
+    if d.event_type == EVENT_HANDOFF_REOPENED:
+        return "Обращение открыто повторно"
+    if d.event_type == EVENT_HANDOFF_CLOSED:
+        return "Обращение закрыто"
+
+    text = (d.content or "").strip()
+    if d.role == ROLE_OPERATOR:
+        return f"Оператор: {text[:120]}"
+    if d.role == ROLE_ASSISTANT:
+        return f"Бот: {text[:120]}"
+    return text[:120]
 
 
 # ──────────────────────────────────────────────────────────
@@ -786,9 +1010,16 @@ def try_unlock(db: Session, key: str) -> bool:
     existing = db.query(Achievement).filter(Achievement.key == key).first()
     if existing:
         return False
-    db.add(Achievement(key=key, unlocked_at=datetime.now(), is_new=True))
+    db.add(Achievement(key=key, unlocked_at=datetime.now(timezone.utc), is_new=True))
     db.commit()
     return True
+
+
+def count_answered_operator_sessions(db: Session) -> int:
+    return db.query(Dialog.session_id).filter(
+        Dialog.role == ROLE_OPERATOR,
+        Dialog.event_type == EVENT_MESSAGE,
+    ).distinct().count()
 
 
 def check_achievements(db: Session) -> list[str]:
@@ -800,27 +1031,45 @@ def check_achievements(db: Session) -> list[str]:
     max_pages = last_crawl.pages_done if last_crawl else 0
 
     dialog_sessions = db.query(Dialog.session_id).distinct().count()
-    total_messages = db.query(Dialog).filter(Dialog.role == "user").count()
-    operator_sessions = db.query(OperatorSession).count()
+    total_messages = db.query(Dialog).filter(
+        Dialog.role == ROLE_USER,
+        Dialog.event_type == EVENT_MESSAGE,
+    ).count()
+
+    operator_requested_sessions = db.query(Dialog.session_id).filter(
+        Dialog.event_type.in_([
+            EVENT_HANDOFF_REQUESTED,
+            EVENT_HANDOFF_REOPENED,
+        ])
+    ).distinct().count()
+
+    operator_answered_sessions = db.query(Dialog.session_id).filter(
+        Dialog.role == ROLE_OPERATOR,
+        Dialog.event_type == EVENT_MESSAGE,
+    ).distinct().count()
+
     s = db.query(SettingsModel).first()
 
     checks = [
-        ("first_crawl",         crawl_count >= 1),
-        ("crawl_5",              crawl_count >= 5),
-        ("crawl_20",             crawl_count >= 20),
-        ("pages_10",             max_pages >= 10),
-        ("pages_50",             max_pages >= 50),
-        ("pages_200",            max_pages >= 200),
-        ("first_dialog",         dialog_sessions >= 1),
-        ("dialogs_10",           dialog_sessions >= 10),
-        ("dialogs_50",           dialog_sessions >= 50),
-        ("dialogs_200",          dialog_sessions >= 200),
-        ("messages_100",         total_messages >= 100),
-        ("messages_1000",        total_messages >= 1000),
-        ("first_operator",       operator_sessions >= 1),
-        ("operator_10",          operator_sessions >= 10),
-        ("operator_50",          operator_sessions >= 50),
-        ("settings_configured",  bool(s and s.openai_key and s.bot_name and s.target_url)),
+        ("first_crawl", crawl_count >= 1),
+        ("crawl_5", crawl_count >= 5),
+        ("crawl_20", crawl_count >= 20),
+        ("pages_10", max_pages >= 10),
+        ("pages_50", max_pages >= 50),
+        ("pages_200", max_pages >= 200),
+
+        ("first_dialog", dialog_sessions >= 1),
+        ("dialogs_10", dialog_sessions >= 10),
+        ("dialogs_50", dialog_sessions >= 50),
+        ("dialogs_200", dialog_sessions >= 200),
+        ("messages_100", total_messages >= 100),
+        ("messages_1000", total_messages >= 1000),
+
+        ("first_operator", operator_requested_sessions >= 1),
+        ("operator_10", operator_answered_sessions >= 10),
+        ("operator_50", operator_answered_sessions >= 50),
+
+        ("settings_configured", bool(s and s.openai_key and s.bot_name and s.target_url)),
     ]
 
     for key, condition in checks:
@@ -828,7 +1077,6 @@ def check_achievements(db: Session) -> list[str]:
             newly.append(key)
 
     return newly
-
 
 class CompleteTaskRequest(BaseModel):
     task_key: str
@@ -859,7 +1107,7 @@ def get_gamification(db: Session = Depends(get_db)):
         })
 
     # Today's tasks
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).date().isoformat()
     completed_today = {
         r.task_key
         for r in db.query(DailyTask).filter(DailyTask.completed_date == today).all()
@@ -875,9 +1123,24 @@ def get_gamification(db: Session = Depends(get_db)):
     new_count = sum(1 for a in unlocked if a.is_new)
 
     # Count pending operator requests (new appeals)
-    pending_operators = db.query(OperatorSession).filter(
-        OperatorSession.status == "pending"
-    ).count()
+    operator_session_ids = [
+        row[0]
+        for row in db.query(Dialog.session_id)
+        .filter(
+            Dialog.event_type.in_([
+                EVENT_HANDOFF_REQUESTED,
+                EVENT_HANDOFF_REOPENED,
+                EVENT_HANDOFF_CLOSED,
+            ])
+        )
+        .distinct()
+        .all()
+    ]
+
+    pending_operators = sum(
+        1 for session_id in operator_session_ids
+        if get_operator_status(session_id, db) == "pending"
+    )
 
     return {
         "achievements": catalogue,
@@ -893,13 +1156,13 @@ def get_gamification(db: Session = Depends(get_db)):
 
 @app.post("/api/gamification/complete-task")
 def complete_daily_task(req: CompleteTaskRequest, db: Session = Depends(get_db)):
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).date().isoformat()
     exists = db.query(DailyTask).filter(
         DailyTask.task_key == req.task_key,
         DailyTask.completed_date == today,
     ).first()
     if not exists:
-        db.add(DailyTask(task_key=req.task_key, completed_date=today, completed_at=datetime.now()))
+        db.add(DailyTask(task_key=req.task_key, completed_date=today, completed_at=datetime.now(timezone.utc)))
         db.commit()
 
         # Check streak achievements
@@ -982,7 +1245,10 @@ def get_actual_bot_config(request: Request, db: Session = Depends(get_db)):
         "accent_color": s.accent_color if s else  "#8000ff",
         "welcome_message": s.welcome_message if s else  "Привет! Чем могу помочь?",
         "chat_bg_color": s.chat_bg_color if s else  "#f8f9fb",
-        "text_color": s.text_color if s else  "#222222"
+        "user_bubble_bg": s.user_bubble_bg if s else  "#01696f",
+        "user_text_color": s.user_text_color if s else  "#ffffff",
+        "bot_bubble_bg": s.bot_bubble_bg if s else  "#ffffff",
+        "bot_text_color": s.bot_text_color if s else  "#222222",
     }
 
 

@@ -15,14 +15,30 @@ import SettingsPage from "@/pages/SettingsPage";
 import EmbedPage from "@/pages/EmbedPage";
 import NotFound from "@/pages/not-found";
 
-// ── Chat panel context ───────────────────────────────────────
-interface ChatPanelCtx {
-  openChat: () => void;
+export interface ChatPreviewSettings {
+  botName?: string;
+  welcomeMessage?: string;
+  accentColor?: string;
+  chatBgColor?: string;
+  userBubbleBg?: string;
+  userTextColor?: string;
+  botBubbleBg?: string;
+  botTextColor?: string;
+  crawlerSettings?: string;
 }
-export const ChatPanelContext = createContext<ChatPanelCtx>({ openChat: () => {} });
-export function useChatPanel() { return useContext(ChatPanelContext); }
 
-// ── Theme context ────────────────────────────────────────────
+interface ChatPanelCtx {
+  openChat: (settings?: ChatPreviewSettings) => void;
+}
+
+export const ChatPanelContext = createContext<ChatPanelCtx>({
+  openChat: () => {},
+});
+
+export function useChatPanel() {
+  return useContext(ChatPanelContext);
+}
+
 type Theme = "light" | "dark";
 
 interface ThemeCtx {
@@ -41,8 +57,6 @@ export function useTheme() {
 
 function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    // Default: light. Can be overridden by user preference stored in URL hash
-    // (we avoid localStorage per the webapp rules, using in-memory state instead)
     return "light";
   });
 
@@ -64,14 +78,23 @@ function ThemeProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ── App ──────────────────────────────────────────────────────
 export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
+  const [previewSettings, setPreviewSettings] = useState<ChatPreviewSettings | null>(null);
+
+  const openChat = (settings?: ChatPreviewSettings) => {
+    setPreviewSettings(settings ?? null);
+    setChatOpen(true);
+  };
+
+  const closeChat = () => {
+    setChatOpen(false);
+  };
 
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <ChatPanelContext.Provider value={{ openChat: () => setChatOpen(true) }}>
+        <ChatPanelContext.Provider value={{ openChat }}>
           <Router hook={useHashLocation}>
             <div className="min-h-screen bg-background text-foreground">
               <Layout>
@@ -86,8 +109,14 @@ export default function App() {
                   <Route component={NotFound} />
                 </Switch>
               </Layout>
+
               <Toaster />
-              <TestChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
+
+              <TestChatPanel
+                open={chatOpen}
+                onClose={closeChat}
+                previewSettings={previewSettings}
+              />
             </div>
           </Router>
         </ChatPanelContext.Provider>

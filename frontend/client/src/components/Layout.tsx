@@ -65,7 +65,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="px-3 pt-3">
           <button
             data-testid="btn-test-chat"
-            onClick={openChat}
+            onClick={() => openChat()}
             className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-primary/10 text-primary hover:bg-primary/20 transition-colors font-medium"
           >
             <MessageCircle className="w-4 h-4 flex-shrink-0" />

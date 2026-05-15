@@ -43,7 +43,12 @@
       var accent = botConfigData.accent_color;
       var welcome = botConfigData.welcome_message;
       var chatBg = botConfigData.chat_bg_color;
-      var textColor = botConfigData.text_color;
+      var userBubbleBg = botConfigData.user_bubble_bg;
+      var userTextColor = botConfigData.user_text_color;
+      var botBubbleBg = botConfigData.bot_bubble_bg;
+      var botTextColor = botConfigData.bot_text_color;
+
+      console.log(botConfigData);
 
 
       var panel = document.createElement('div');
@@ -111,10 +116,10 @@
           #sa-widget-operator-bar.visible { display:flex; }
           #sa-widget-operator-bar .sa-op-dot { width:8px; height:8px; border-radius:50%; background:#3a7bc8; animation:sa-pulse 1.5s infinite; }
           @keyframes sa-pulse { 0%,100% { opacity:1; } 50% { opacity:0.35; } }
-          #sa-widget-messages { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:9px; background:${chatBg}; color:${textColor}; }
+          #sa-widget-messages { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:9px; background:${chatBg}; padding-bottom: 3.5rem;}
           .sa-msg { max-width:82%; padding:9px 13px; border-radius:12px; font-size:13.5px; line-height:1.5; word-break:break-word; }
-          .sa-msg.user { align-self:flex-end; background:${accent}; color:${textColor}; border-bottom-right-radius:4px; }
-          .sa-msg.bot { align-self:flex-start; background:#fff; color:${textColor}; border-bottom-left-radius:4px; box-shadow:0 1px 4px rgba(0,0,0,0.08); }
+          .sa-msg.user { align-self:flex-end; background:${userBubbleBg}; color:${userTextColor}; border-bottom-right-radius:4px; }
+          .sa-msg.bot { align-self:flex-start; background:${botBubbleBg}; color:${botTextColor}; border-bottom-left-radius:4px; box-shadow:0 1px 4px rgba(0,0,0,0.08); }
           .sa-msg.operator { align-self:flex-start; background:#eef7ff; color:#1a4a7a; border-bottom-left-radius:4px; box-shadow:0 1px 4px rgba(0,0,0,0.06); border-left:3px solid #3a8fe8; }
           .sa-msg.system { align-self:center; background:#f0f0f0; color:#666; font-size:12px; padding:5px 12px; border-radius:99px; font-style:italic; }
           .sa-msg.typing { color:#999; font-style:italic; }

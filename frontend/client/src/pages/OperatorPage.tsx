@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { formatServerDate } from "@/lib/datetime";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
@@ -27,9 +28,10 @@ interface OperatorSession {
 interface OperatorMessage {
   id: number;
   sessionId: string;
-  role: "user" | "operator";
-  content: string;
+  role: "user" | "operator" | "assistant" | "system";
+  content: string | null;
   createdAt: string;
+  eventType?: "message" | "handoff_requested" | "handoff_closed" | "handoff_reopened";
 }
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -89,12 +91,17 @@ export default function OperatorPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const formatDate = (d: string) => {
-    try {
-      return new Date(d).toLocaleString("ru-RU", {
-        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-      });
-    } catch { return d; }
+  const getSystemEventLabel = (msg: OperatorMessage) => {
+    switch (msg.eventType) {
+      case "handoff_requested":
+        return "Пользователь запросил оператора";
+      case "handoff_closed":
+        return "Обращение закрыто";
+      case "handoff_reopened":
+        return "Обращение снова открыто";
+      default:
+        return null;
+    }
   };
 
   const selectedSession = sessions.find((s) => s.sessionId === selectedId);
@@ -105,6 +112,7 @@ export default function OperatorPage() {
     if (!text || !selectedId) return;
     sendMutation.mutate(text);
   };
+
 
   return (
     <div className="p-8 max-w-6xl">
@@ -126,9 +134,9 @@ export default function OperatorPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-5 gap-4 h-[calc(100vh-210px)]">
+      <div className="grid grid-cols-5 gap-4 h-[calc(100vh-148px)]">
         {/* Sessions list */}
-        <Card className="col-span-2 bg-card border-border flex flex-col">
+        <Card className="col-span-2 bg-card border-border flex flex-col overflow-y-auto">
           <CardHeader className="pb-3 border-b border-border flex-shrink-0">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center justify-between">
               Обращения
@@ -182,7 +190,7 @@ export default function OperatorPage() {
                       <div className="text-sm text-foreground truncate">{s.lastMessage || "—"}</div>
                       <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
                         <Clock className="w-3 h-3" />
-                        {formatDate(s.updatedAt)}
+                        {formatServerDate(s.updatedAt)}
                       </div>
                     </div>
                   );
@@ -193,7 +201,7 @@ export default function OperatorPage() {
         </Card>
 
         {/* Chat panel */}
-        <Card className="col-span-3 bg-card border-border flex flex-col">
+        <Card className="col-span-3 bg-card border-border flex flex-col overflow-y-auto">
           {/* Chat header */}
           <CardHeader className="pb-3 border-b border-border flex-shrink-0">
             <div className="flex items-center justify-between">
@@ -239,47 +247,46 @@ export default function OperatorPage() {
               <>
                 <ScrollArea className="flex-1 p-4">
                   <div className="flex flex-col gap-3">
-                    {messages.map((msg, idx) => (
-                      <div
-                        key={msg.id}
-                        data-testid={`op-msg-${idx}`}
-                        className={cn(
-                          "flex gap-2.5 max-w-[85%]",
-                          msg.role === "operator" ? "ml-auto flex-row-reverse" : ""
-                        )}
-                      >
+                    {messages.map((msg) => {
+                      const isSystemEvent = msg.eventType && msg.eventType !== "message";
+                      const systemLabel = getSystemEventLabel(msg);
+
+                      if (isSystemEvent && systemLabel) {
+                        return (
+                          <div key={msg.id} className="flex items-center justify-center my-3">
+                            <div className="rounded-full border border-border bg-muted px-3 py-1 text-xs text-muted-foreground">
+                              {systemLabel} · {formatServerDate(msg.createdAt)}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
                         <div
+                          key={msg.id}
                           className={cn(
-                            "w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0",
-                            msg.role === "operator" ? "bg-primary/20" : "bg-muted"
+                            "flex mb-3",
+                            msg.role === "operator" ? "justify-end" : "justify-start"
                           )}
                         >
-                          {msg.role === "operator"
-                            ? <Headphones className="w-3.5 h-3.5 text-primary" />
-                            : <User className="w-3.5 h-3.5 text-muted-foreground" />}
-                        </div>
-                        <div>
                           <div
                             className={cn(
-                              "rounded-xl px-3.5 py-2.5 text-sm",
+                              "max-w-[80%] rounded-2xl px-4 py-2 text-sm shadow-sm",
                               msg.role === "operator"
-                                ? "bg-primary/15 text-foreground"
-                                : "bg-muted text-foreground"
+                                ? "bg-primary text-primary-foreground rounded-br-md"
+                                : "bg-muted text-foreground rounded-bl-md"
                             )}
                           >
-                            {msg.content}
-                          </div>
-                          <div
-                            className={cn(
-                              "text-xs text-muted-foreground mt-1",
-                              msg.role === "operator" ? "text-right" : "text-left"
-                            )}
-                          >
-                            {msg.role === "operator" ? "Оператор" : "Пользователь"} · {formatDate(msg.createdAt)}
+                            <div className="whitespace-pre-wrap break-words">
+                              {msg.content || "—"}
+                            </div>
+                            <div className="mt-1 text-[11px] opacity-70">
+                              {msg.role === "operator" ? "Оператор" : "Пользователь"} · {formatServerDate(msg.createdAt)}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                     <div ref={bottomRef} />
                   </div>
                 </ScrollArea>
