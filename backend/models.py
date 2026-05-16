@@ -97,25 +97,3 @@ class DailyTask(Base):
     task_key: Mapped[str] = mapped_column(String(64))          # e.g. "check_dialogs"
     completed_date: Mapped[str] = mapped_column(String(16))    # YYYY-MM-DD
     completed_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-
-
-class OperatorSession(Base):
-    """Tracks which chat sessions have requested operator handoff."""
-    __tablename__ = "operator_sessions"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[str] = mapped_column(String(128), unique=True)
-    status: Mapped[str] = mapped_column(String(32), default="pending")  # pending | active | closed
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
-
-
-class OperatorMessage(Base):
-    """Messages between operator and user (bypassing AI)."""
-    __tablename__ = "operator_messages"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[str] = mapped_column(String(128))
-    role: Mapped[str] = mapped_column(String(16))  # user | operator
-    content: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
