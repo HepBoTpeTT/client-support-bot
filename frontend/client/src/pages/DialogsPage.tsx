@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { MessageSquare, User, Bot, Clock, Trash2, Headphones, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { useConfirm } from "@/hooks/use-confirm";
 
 interface SessionSummary {
   sessionId: string;
@@ -29,6 +30,7 @@ interface Dialog {
 export default function DialogsPage() {
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const { toast } = useToast();
+  const confirm = useConfirm();
   const qc = useQueryClient();
 
   const { data: sessions = [], isLoading } = useQuery<SessionSummary[]>({
@@ -61,6 +63,32 @@ export default function DialogsPage() {
       qc.invalidateQueries({ queryKey: ["/api/dialogs"] });
     },
   });
+
+  const handleDeleteAll = async () => {
+    const ok = await confirm({
+      title: "Удалить все диалоги?",
+      description: "Будет удалена вся история разговоров пользователей с AI-помощником.",
+      confirmText: "Удалить всё",
+      cancelText: "Отмена",
+      variant: "destructive",
+    });
+
+    if (!ok) return;
+    deleteAll.mutate();
+  };
+
+  const handleDeleteOne = async (sessionId: string) => {
+    const ok = await confirm({
+      title: "Удалить диалог?",
+      description: `Сессия ${sessionId.slice(0, 20)}... будет удалена без возможности восстановления.`,
+      confirmText: "Удалить",
+      cancelText: "Отмена",
+      variant: "destructive",
+    });
+
+    if (!ok) return;
+    deleteOne.mutate(sessionId);
+  };
 
   const getSystemEventLabel = (eventType: Dialog["eventType"], role?: Dialog["role"]) => {
     switch (eventType) {
@@ -95,7 +123,7 @@ export default function DialogsPage() {
             size="sm"
             variant="destructive"
             data-testid="btn-delete-all-dialogs"
-            onClick={() => deleteAll.mutate()}
+            onClick={handleDeleteAll}
             disabled={deleteAll.isPending}
             className="gap-2"
           >
@@ -148,7 +176,7 @@ export default function DialogsPage() {
                           data-testid={`btn-delete-session-${i}`}
                           onClick={(e) => {
                             e.stopPropagation();
-                            deleteOne.mutate(s.sessionId);
+                            handleDeleteOne(s.sessionId);
                           }}
                           disabled={deleteOne.isPending}
                           title="Удалить сессию"

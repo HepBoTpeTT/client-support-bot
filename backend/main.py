@@ -137,6 +137,7 @@ class SettingsUpdate(CamelModel):
     welcome_message: str | None = None
     accent_color: str | None = None
     language: str | None = None
+    system_prompt: str | None = None
     target_url: str | None = None
     model: str | None = None
     crawler_settings: str | None = None
@@ -174,6 +175,7 @@ def settings_to_dict(s: SettingsModel, mask: bool = True) -> dict:
         "welcomeMessage": s.welcome_message,
         "accentColor": s.accent_color,
         "language": s.language,
+        "systemPrompt": s.system_prompt,
         "targetUrl": s.target_url,
         "model": s.model,
         "crawlerSettings": s.crawler_settings,
@@ -183,6 +185,39 @@ def settings_to_dict(s: SettingsModel, mask: bool = True) -> dict:
         "botBubbleBg": getattr(s, "bot_bubble_bg", "#ffffff") or "#ffffff",
         "botTextColor": getattr(s, "bot_text_color", "#222222") or "#222222",
     }
+
+class SafeDict(dict):
+    def __missing__(self, key):
+        return "{" + key + "}"
+
+def build_system_prompt(s: SettingsModel, context: str) -> str:
+    lang_map = {
+        "ru": "русском",
+        "en": "английском",
+        "uk": "украинском",
+    }
+
+    template = (s.system_prompt or "").strip()
+    if not template:
+        template = (
+            "Ты — {bot_name}, вежливый и компетентный AI-помощник сайта.\n"
+            "Отвечай только по теме сайта и его услуг/товаров.\n"
+            "Если вопрос не по теме — вежливо перенаправь.\n"
+            "Отвечай на {language} языке.\n"
+            "Используй следующий контекст из базы знаний сайта:\n\n"
+            "{context}"
+        )
+
+    values = SafeDict(
+        bot_name=s.bot_name or "Помощник",
+        language=lang_map.get(s.language, s.language or "русском"),
+        context=context or "База знаний пуста. Ответь на основе общих знаний.",
+        welcome_message=s.welcome_message or "",
+        model=s.model or "gpt-4o",
+        target_url=s.target_url or "",
+    )
+
+    return template.format_map(values).strip()
 
 
 @app.get("/api/settings")
@@ -446,17 +481,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
 
     logging.info("Контекст, направляемый в OpenAI API: \n%s", context)
 
-    lang_map = {"ru": "русском", "en": "английском", "uk": "украинском"}
-    lang_name = lang_map.get(s.language, s.language)
-
-    system_prompt = (
-        f"Ты — {s.bot_name}, вежливый и компетентный AI-помощник сайта.\n"
-        f"Отвечай только по теме сайта и его услуг/товаров.\n"
-        f"Если вопрос не по теме — вежливо перенаправь.\n"
-        f"Отвечай на {lang_name} языке.\n"
-        f"Используй следующий контекст из базы знаний сайта:\n\n{context}"
-    )
-
+    system_prompt = build_system_prompt(s, context)
     _proxy = settings.openai_proxy or settings.http_proxy or None
     if _proxy:
         try:

@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
+import { useConfirm } from "@/hooks/use-confirm";
 import { Globe, Play, RefreshCw, CheckCircle, AlertCircle, Clock, FileText, CheckSquare, Square, MessageSquare, ShoppingCart, Trophy, Sparkles, Trash2 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
@@ -25,6 +26,7 @@ interface CrawlSession {
 export default function CrawlerPage() {
   const [url, setUrl] = useState("");
   const { toast } = useToast();
+  const confirm = useConfirm();
   const qc = useQueryClient();
 
   const [justFinished, setJustFinished] = useState(false);
@@ -70,6 +72,19 @@ export default function CrawlerPage() {
     },
   });
 
+  const handleDeleteCrawlHistory = async () => {
+    const ok = await confirm({
+      title: "Очистить историю запусков?",
+      description: "Будет удалена история предыдущих запусков парсинга.",
+      confirmText: "Очистить",
+      cancelText: "Отмена",
+      variant: "destructive",
+    });
+
+    if (!ok) return;
+    deleteCrawlHistory.mutate();
+  };
+
   const startCrawl = useMutation({
     mutationFn: (targetUrl: string) =>
       apiRequest("POST", "/api/crawl/start", { url: targetUrl }),
@@ -93,8 +108,13 @@ export default function CrawlerPage() {
     startCrawl.mutate(url);
   };
 
-  const progress = crawlStatus?.pagesFound
-    ? Math.round(((crawlStatus.pagesDone ?? 0) / crawlStatus.pagesFound) * 100)
+  const displayPagesFound =
+    crawlStatus?.status === "done"
+      ? (crawlStatus?.pagesDone ?? 0)
+      : (crawlStatus?.pagesFound ?? 0);
+
+  const progress = displayPagesFound
+    ? Math.round(((crawlStatus?.pagesDone ?? 0) / displayPagesFound) * 100)
     : 0;
 
   const statusIcon = {
@@ -281,7 +301,7 @@ export default function CrawlerPage() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-muted rounded-lg p-3 text-center">
-                <div className="text-2xl font-bold text-foreground">{crawlStatus.pagesFound ?? 0}</div>
+                <div className="text-2xl font-bold text-foreground">{displayPagesFound}</div>
                 <div className="text-xs text-muted-foreground mt-1">Найдено страниц</div>
               </div>
               <div className="bg-muted rounded-lg p-3 text-center">
@@ -334,7 +354,7 @@ export default function CrawlerPage() {
                 size="sm"
                 variant="destructive"
                 data-testid="btn-delete-crawl-history"
-                onClick={() => deleteCrawlHistory.mutate()}
+                onClick={handleDeleteCrawlHistory}
                 disabled={deleteCrawlHistory.isPending}
                 className="gap-2"
               >

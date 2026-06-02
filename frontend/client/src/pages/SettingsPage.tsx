@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ColorField } from "@/components/ui/color-field";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
@@ -26,6 +27,7 @@ interface SettingsData {
   language: string;
   targetUrl: string;
   model: string;
+  systemPrompt: string;
 }
 
 export default function SettingsPage() {
@@ -77,7 +79,6 @@ export default function SettingsPage() {
     const value = newTags.join(" ");
     set("crawlerSettings", value);
   }
-
 
   if (isLoading) return <div className="p-8 text-muted-foreground">Загрузка...</div>;
 
@@ -142,6 +143,7 @@ export default function SettingsPage() {
         </Card>
 
         {/* Bot identity */}
+
         <Card className="bg-card border-border">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
@@ -183,6 +185,29 @@ export default function SettingsPage() {
                   <SelectItem value="uk">Українська</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1.5 block">
+                Системный промпт
+              </Label>
+              <Textarea
+                data-testid="input-system-prompt"
+                value={form.systemPrompt ?? ""}
+                onChange={(e) => set("systemPrompt", e.target.value)}
+                placeholder="Ты — {botName}, AI-помощник университета. Отвечай на языке {language}. Будь вежливым, кратким и полезным."
+                className="min-h-[140px] bg-muted border-border text-foreground placeholder:text-muted-foreground"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Инструкция для GPT-модели. Можно использовать переменные:
+                <code className="mx-1 rounded border border-border bg-background px-1 py-0.5">
+                  {"{bot_name}"}
+                </code>
+                и
+                <code className="ml-1 rounded border border-border bg-background px-1 py-0.5">
+                  {"{language}"}
+                </code>
+                .
+              </p>
             </div>
           </CardContent>
         </Card>

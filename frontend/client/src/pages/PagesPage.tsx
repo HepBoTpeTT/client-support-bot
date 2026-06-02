@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useConfirm } from "@/hooks/use-confirm";
 import { Table2, Search, Trash2, Eye, ExternalLink, Database } from "lucide-react";
 
 interface Page {
@@ -38,6 +39,7 @@ export default function PagesPage() {
   };
 
   const { toast } = useToast();
+  const confirm = useConfirm();
   const qc = useQueryClient();
 
   const { data: pages = [], isLoading } = useQuery<Page[]>({
@@ -59,6 +61,34 @@ export default function PagesPage() {
       qc.invalidateQueries({ queryKey: ["/api/pages"] });
     },
   });
+
+  const handleDeletePage = async (id: number, title?: string) => {
+    const ok = await confirm({
+      title: "Удалить страницу?",
+      description: title
+        ? `Страница "${title}" будет удалена из базы знаний.`
+        : "Страница будет удалена из базы знаний.",
+      confirmText: "Удалить",
+      cancelText: "Отмена",
+      variant: "destructive",
+    });
+
+    if (!ok) return;
+    deletePage.mutate(id);
+  };
+
+  const handleClearAll = async () => {
+    const ok = await confirm({
+      title: "Удалить все страницы?",
+      description: "Вся база знаний из спарсированных страниц будет очищена.",
+      confirmText: "Очистить всё",
+      cancelText: "Отмена",
+      variant: "destructive",
+    });
+
+    if (!ok) return;
+    clearAll.mutate();
+  };
 
   const filtered = pages.filter(p =>
     p.url.toLowerCase().includes(search.toLowerCase()) ||
@@ -118,7 +148,7 @@ export default function PagesPage() {
             data-testid="button-clear-all"
             variant="destructive"
             size="sm"
-            onClick={() => clearAll.mutate()}
+            onClick={handleClearAll}
             disabled={pages.length === 0}
             className="gap-2"
           >
@@ -201,7 +231,7 @@ export default function PagesPage() {
                             data-testid={`button-delete-page-${page.id}`}
                             variant="ghost" size="icon"
                             className="w-7 h-7 hover:bg-destructive/20 hover:text-destructive"
-                            onClick={() => deletePage.mutate(page.id)}
+                            onClick={() => handleDeletePage(page.id, page.title)}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>

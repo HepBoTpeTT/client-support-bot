@@ -17,6 +17,14 @@ class Settings(Base):
     model: Mapped[str] = mapped_column(String(64), default="gpt-4o")
     bot_name: Mapped[str] = mapped_column(String(255), default="Помощник")
     welcome_message: Mapped[str] = mapped_column(Text, default="Привет! Чем могу помочь?")
+    system_prompt: Mapped[str] = mapped_column(Text, default=
+            "Ты — {bot_name}, вежливый и компетентный AI-помощник сайта.\n"
+            "Отвечай только по теме сайта и его услуг/товаров.\n"
+            "Если вопрос не по теме — вежливо перенаправь.\n"
+            "Отвечай на {language} языке.\n"
+            "Используй следующий контекст из базы знаний сайта:\n\n"
+            "{context}"
+        )
     accent_color: Mapped[str] = mapped_column(String(32), default="#01696f")
     chat_bg_color: Mapped[str] = mapped_column(String(32), default="#f8f9fb")
     user_bubble_bg: Mapped[str] = mapped_column(String(32), default="#01696f")

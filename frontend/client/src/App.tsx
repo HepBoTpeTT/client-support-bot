@@ -4,6 +4,7 @@ import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
+import { ConfirmProvider } from "@/hooks/use-confirm";
 import Layout from "@/components/Layout";
 import TestChatPanel from "@/components/TestChatPanel";
 import CrawlerPage from "@/pages/CrawlerPage";
@@ -95,30 +96,32 @@ export default function App() {
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <ChatPanelContext.Provider value={{ openChat }}>
-          <Router hook={useHashLocation}>
-            <div className="min-h-screen bg-background text-foreground">
-              <Layout>
-                <Switch>
-                  <Route path="/" component={CrawlerPage} />
-                  <Route path="/pages" component={PagesPage} />
-                  <Route path="/dialogs" component={DialogsPage} />
-                  <Route path="/operator" component={OperatorPage} />
-                  <Route path="/achievements" component={AchievementsPage} />
-                  <Route path="/settings" component={SettingsPage} />
-                  <Route path="/embed" component={EmbedPage} />
-                  <Route component={NotFound} />
-                </Switch>
-              </Layout>
+          <ConfirmProvider>
+            <Router hook={useHashLocation}>
+              <div className="min-h-screen bg-background text-foreground">
+                <Layout>
+                  <Switch>
+                    <Route path="/" component={CrawlerPage} />
+                    <Route path="/pages" component={PagesPage} />
+                    <Route path="/dialogs" component={DialogsPage} />
+                    <Route path="/operator" component={OperatorPage} />
+                    <Route path="/achievements" component={AchievementsPage} />
+                    <Route path="/settings" component={SettingsPage} />
+                    <Route path="/embed" component={EmbedPage} />
+                    <Route component={NotFound} />
+                  </Switch>
+                </Layout>
 
-              <Toaster />
+                <Toaster />
 
-              <TestChatPanel
-                open={chatOpen}
-                onClose={closeChat}
-                previewSettings={previewSettings}
-              />
-            </div>
-          </Router>
+                <TestChatPanel
+                  open={chatOpen}
+                  onClose={closeChat}
+                  previewSettings={previewSettings}
+                />
+              </div>
+            </Router>
+          </ConfirmProvider>
         </ChatPanelContext.Provider>
       </QueryClientProvider>
     </ThemeProvider>
