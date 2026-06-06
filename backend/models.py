@@ -105,3 +105,17 @@ class DailyTask(Base):
     task_key: Mapped[str] = mapped_column(String(64))          # e.g. "check_dialogs"
     completed_date: Mapped[str] = mapped_column(String(16))    # YYYY-MM-DD
     completed_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+
+class Stats(Base):
+    __tablename__ = "stats"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    # Crawler
+    total_crawl_runs: Mapped[int] = mapped_column(Integer, default=0)
+    max_pages_in_run: Mapped[int] = mapped_column(Integer, default=0)
+    # Dialogs
+    total_dialog_sessions: Mapped[int] = mapped_column(Integer, default=0)
+    total_user_messages: Mapped[int] = mapped_column(Integer, default=0)
+    # Operator
+    total_operator_requested: Mapped[int] = mapped_column(Integer, default=0)
+    total_operator_answered: Mapped[int] = mapped_column(Integer, default=0)

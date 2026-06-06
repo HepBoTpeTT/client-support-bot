@@ -34,12 +34,14 @@ const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
 
 const CATEGORIES = ["crawler", "dialogs", "operator", "settings", "daily"] as const;
 
+document.title = "Достижения"
+
 export default function AchievementsPage() {
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery<GamificationData>({
     queryKey: ["/api/gamification"],
-    refetchInterval: 15000,
+    refetchInterval: 10000,
   });
 
   const markSeen = useMutation({
@@ -47,11 +49,13 @@ export default function AchievementsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/gamification"] }),
   });
 
-  // Mark new achievements as seen when the page opens
+
   useEffect(() => {
-    if (data?.stats.newCount && data.stats.newCount > 0) {
-      markSeen.mutate();
-    }
+    return () => {
+        if (data?.stats.newCount && data.stats.newCount > 0) {
+            markSeen.mutate();
+        }
+    };
   }, [data?.stats.newCount]);
 
   const formatDate = (d: string) => {

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     mysql_port: int = 3306
     mysql_user: str = "root"
     mysql_password: str = ""
+    mysql_root_password: str = ""
     mysql_database: str = "site_assistant"
 
     # App

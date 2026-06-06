@@ -13,342 +13,441 @@ import { Settings, Eye, EyeOff, Save, Bot, Palette, Key, Globe, Play } from "luc
 import { useChatPanel } from "@/App";
 
 interface SettingsData {
-  id: number;
-  openaiKey: string;
-  botName: string;
-  welcomeMessage: string;
-  accentColor: string;
-  chatBgColor: string;
-  userBubbleBg: string;
-  userTextColor: string;
-  botBubbleBg: string;
-  botTextColor: string;
-  crawlerSettings: string;
-  language: string;
-  targetUrl: string;
-  model: string;
-  systemPrompt: string;
+    id: number;
+    openaiKey: string;
+    botName: string;
+    welcomeMessage: string;
+    accentColor: string;
+    chatBgColor: string;
+    userBubbleBg: string;
+    userTextColor: string;
+    botBubbleBg: string;
+    botTextColor: string;
+    crawlerSettings: string;
+    language: string;
+    targetUrl: string;
+    model: string;
+    systemPrompt: string;
 }
 
 export default function SettingsPage() {
-  const { toast } = useToast();
-  const qc = useQueryClient();
-  const { openChat } = useChatPanel();
-  const [showKey, setShowKey] = useState(false);
-  const [form, setForm] = useState<Partial<SettingsData>>({});
+    const { toast, dismiss } = useToast();
+    const qc = useQueryClient();
+    const { openChat } = useChatPanel();
+    const [showKey, setShowKey] = useState(false);
+    const [hasUserEdited, setHasUserEdited] = useState(false);
+    const [form, setForm] = useState<Partial<SettingsData>>({});
 
-  const { data: settings, isLoading } = useQuery<SettingsData>({
-    queryKey: ["/api/settings"],
-  });
-  const [tags, setTags] = useState<string[]>([]);
-  const [inputValue, setInputValue] = useState("");
+    const { data: settings, isLoading } = useQuery<SettingsData>({
+        queryKey: ["/api/settings"],
+    });
+    const [tags, setTags] = useState<string[]>([]);
+    const [inputValue, setInputValue] = useState("");
+    const unsavedToastRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (settings) setForm(settings);
-    if (settings?.crawlerSettings) {
-      setTags(settings.crawlerSettings.split(" ").filter(Boolean));
+    useEffect(() => {
+        if (settings){
+            setForm(settings);
+            setHasUserEdited(false);
+        }
+        if (settings?.crawlerSettings) {
+            setTags(settings.crawlerSettings.split(" ").filter(Boolean));
+        }
+    }, [settings]);
+
+    const normalizeSettings = (data?: Partial<SettingsData>) => ({
+        openaiKey: data?.openaiKey ?? "",
+        botName: data?.botName ?? "",
+        welcomeMessage: data?.welcomeMessage ?? "",
+        accentColor: data?.accentColor ?? "",
+        chatBgColor: data?.chatBgColor ?? "",
+        userBubbleBg: data?.userBubbleBg ?? "",
+        userTextColor: data?.userTextColor ?? "",
+        botBubbleBg: data?.botBubbleBg ?? "",
+        botTextColor: data?.botTextColor ?? "",
+        crawlerSettings: (data?.crawlerSettings ?? "").trim(),
+        language: data?.language ?? "",
+        targetUrl: data?.targetUrl ?? "",
+        model: data?.model ?? "",
+        systemPrompt: (data?.systemPrompt ?? "").trim(),
+    });
+
+    const isDirty = !!settings && hasUserEdited &&
+        JSON.stringify(normalizeSettings(form)) !==
+        JSON.stringify(normalizeSettings(settings));
+
+    useEffect(() => {
+        if (!settings) return;
+
+        if (isDirty && !unsavedToastRef.current) {
+            const result = toast({
+            title: "Есть несохранённые изменения",
+            description: "Сохраните настройки, чтобы применить их.",
+            duration: Infinity,
+            });
+            unsavedToastRef.current = result.id;
+        }
+
+        if (!isDirty && unsavedToastRef.current) {
+            dismiss(unsavedToastRef.current);
+            unsavedToastRef.current = null;
+        }
+    }, [isDirty, settings, toast, dismiss]);
+
+    const update = useMutation({
+        mutationFn: (data: Partial<SettingsData>) => apiRequest("PATCH", "/api/settings", data),
+        onSuccess: () => {
+            if (unsavedToastRef.current) {
+                dismiss(unsavedToastRef.current);
+                unsavedToastRef.current = null;
+            }
+            setHasUserEdited(false);
+
+            toast({ title: "Настройки сохранены" });
+            qc.invalidateQueries({ queryKey: ["/api/settings"] });
+            setInputValue("");
+        },
+        onError: (e: any) => {
+            toast({ title: "Ошибка сохранения", description: e.message, variant: "destructive" });
+        },
+    });
+
+    const handleSave = () => {
+        const botName = (form.botName ?? "").trim();
+        const welcomeMessage = (form.welcomeMessage ?? "").trim();
+        const systemPrompt = (form.systemPrompt ?? "").trim();
+        const openaiKey = (form.openaiKey ?? "").trim();
+
+        if (!botName) {
+            toast({
+            title: "Ошибка сохранения",
+            description: "Поле «Имя бота» не может быть пустым.",
+            variant: "destructive",
+            });
+            return;
+        }
+
+        if (!welcomeMessage) {
+            toast({
+            title: "Ошибка сохранения",
+            description: "Поле «Приветственное сообщение» не может быть пустым.",
+            variant: "destructive",
+            });
+            return;
+        }
+
+        if (!systemPrompt) {
+            toast({
+            title: "Ошибка сохранения",
+            description: "Поле «Системный промпт» не может быть пустым.",
+            variant: "destructive",
+            });
+            return;
+        }
+
+        if (!openaiKey) {
+            toast({
+            title: "Ошибка сохранения",
+            description: "Поле Api Ключ не может быть пустым.",
+            variant: "destructive",
+            });
+            return;
+        }
+
+        update.mutate({
+            ...form,
+            botName,
+            welcomeMessage,
+            systemPrompt,
+        });
+    };
+
+    const set = (key: keyof SettingsData, value: string) => {
+        setHasUserEdited(true);
+        setForm(f => ({ ...f, [key]: value }));
+    };
+
+
+    function getTagClass(tag: string) {
+        if (tag.startsWith('.')) return 'bg-primary/20 text-primary border-primary/30';                              //class-item class
+        if (tag.startsWith('#')) return 'bg-[rgba(255,232,0,0.2)] border-[rgba(177,156,0,0.3)] text-yellow-700'; //id-item class
+        return 'bg-[rgba(0,48,182,0.2)] text-[hsl(216.7,85.9%,41.8%)] border-blue-800/50';                       //tag-item class
     }
-  }, [settings]);
 
-  const update = useMutation({
-    mutationFn: (data: Partial<SettingsData>) => apiRequest("PATCH", "/api/settings", data),
-    onSuccess: () => {
-      toast({ title: "Настройки сохранены" });
-      qc.invalidateQueries({ queryKey: ["/api/settings"] });
-      setInputValue("");
-    },
-    onError: (e: any) => {
-      toast({ title: "Ошибка сохранения", description: e.message, variant: "destructive" });
-    },
-  });
+    function handleTagDelete(index: number) {
+        const newTags = tags.filter((_, i) => i !== index);
+        setTags(newTags);
+        const value = newTags.join(" ");
+        set("crawlerSettings", value);
+    }
 
-  const set = (key: keyof SettingsData, value: string) => {
-    setForm(f => ({ ...f, [key]: value }));
-  };
+    if (isLoading) return <div className="p-8 text-muted-foreground">Загрузка...</div>;
+
+    return (
+        <div className="p-8 max-w-2xl">
+            <div className="mb-8">
+                <h1 className="text-xl font-semibold text-foreground flex items-center gap-2">
+                    <Settings className="w-5 h-5 text-primary" />
+                    Настройки виджета
+                </h1>
+                <p className="text-sm text-muted-foreground mt-1">
+                    Конфигурация AI-помощника и параметры отображения
+                </p>
+            </div>
+
+            <div className="space-y-5">
+                {/* OpenAI */}
+                <Card className="bg-card border-border">
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                            <Key className="w-4 h-4 text-primary" />
+                            OpenAI API
+                        </CardTitle>
+                        <CardDescription>Ключ для доступа к OpenAI API</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                        <div>
+                            <Label className="text-xs text-muted-foreground mb-1.5 block">API Ключ</Label>
+                            <div className="relative">
+                                <Input
+                                    data-testid="input-api-key"
+                                    type={showKey ? "text" : "password"}
+                                    value={form.openaiKey || ""}
+                                    onChange={e => set("openaiKey", e.target.value)}
+                                    placeholder="sk-..."
+                                    className="bg-muted border-border text-foreground pr-10 placeholder:text-muted-foreground"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowKey(!showKey)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                >
+                                    {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <Label className="text-xs text-muted-foreground mb-1.5 block">Модель</Label>
+                            <Select value={form.model || "gpt-4o"} onValueChange={v => set("model", v)}>
+                                <SelectTrigger data-testid="select-model" className="bg-muted border-border text-foreground">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="bg-card border-border">
+                                    <SelectItem value="gpt-4o">GPT-4o (рекомендуется)</SelectItem>
+                                    <SelectItem value="gpt-4o-mini">GPT-4o Mini (быстрее, дешевле)</SelectItem>
+                                    <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
+                                    <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Bot identity */}
+
+                <Card className="bg-card border-border">
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                            <Bot className="w-4 h-4 text-primary" />
+                            Личность бота
+                        </CardTitle>
+                        <CardDescription>Как бот представляется пользователям</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                        <div>
+                            <Label className="text-xs text-muted-foreground mb-1.5 block">Имя бота</Label>
+                            <Input
+                                data-testid="input-bot-name"
+                                value={form.botName || ""}
+                                onChange={e => set("botName", e.target.value)}
+                                placeholder="Помощник"
+                                className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+                            />
+                        </div>
+                        <div>
+                            <Label className="text-xs text-muted-foreground mb-1.5 block">Приветственное сообщение</Label>
+                            <Input
+                                data-testid="input-welcome"
+                                value={form.welcomeMessage || ""}
+                                onChange={e => set("welcomeMessage", e.target.value)}
+                                placeholder="Привет! Чем могу помочь?"
+                                className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+                            />
+                        </div>
+                        <div>
+                            <Label className="text-xs text-muted-foreground mb-1.5 block">Язык ответов</Label>
+                            <Select value={form.language || "ru"} onValueChange={v => set("language", v)}>
+                                <SelectTrigger data-testid="select-language" className="bg-muted border-border text-foreground">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="bg-card border-border">
+                                    <SelectItem value="ru">Русский</SelectItem>
+                                    <SelectItem value="en">English</SelectItem>
+                                    <SelectItem value="uk">Українська</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label className="text-xs text-muted-foreground mb-1.5 block">
+                                Системный промпт
+                            </Label>
+                            <Textarea
+                                data-testid="input-system-prompt"
+                                value={form.systemPrompt ?? ""}
+                                onChange={(e) => set("systemPrompt", e.target.value)}
+                                placeholder="Ты — {botName}, AI-помощник университета. Отвечай на языке {language}. Будь вежливым, кратким и полезным."
+                                className="min-h-[140px] bg-muted border-border text-foreground placeholder:text-muted-foreground"
+                            />
+                            <p className="mt-1 text-xs text-muted-foreground">
+                                Инструкция для GPT-модели. Можно использовать переменные:
+                                <code className="mx-1 rounded border border-border bg-background px-1 py-0.5">
+                                    {"{bot_name}"}
+                                </code>
+                                и
+                                <code className="ml-1 rounded border border-border bg-background px-1 py-0.5">
+                                    {"{language}"}
+                                </code>
+                                .
+                            </p>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Crawler settings */}
+                <Card className="bg-card border-border">
+                    <CardHeader>
+                        <CardTitle className="text-sm flex items-center gap-2">
+                            <Settings className="w-4 h-4 text-primary" />
+                            Настройки парсинга
+                        </CardTitle>
+                        <CardDescription>
+                            Укажите <code className="bg-[rgba(0,48,182,0.2)] text-[hsl(216.7,85.9%,41.8%)] border-blue-800/50 border rounded-md p-1">теги</code>
+                            , <code className="bg-primary/20 text-primary border-primary/30 border rounded-md p-1">.классы</code>
+                            , <code className="bg-[rgba(255,232,0,0.2)] border-[rgba(177,156,0,0.3)] text-yellow-700 border rounded-md p-1">#id</code>
+                            , которые следует игнорировать, через пробел
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="min-h-[26px] mb-3">
+                            {/* Exceptions */}
+                            {tags.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                    {tags.map((tag, i) => (
+                                        <div key={i} className={`flex border items-center gap-1 p-1 cursor-pointer rounded-md text-xs font-mono ${getTagClass(tag)}`}>
+                                            <span>{tag}</span>
+                                            <button type="button" onClick={() => handleTagDelete(i)}
+                                                className="ml-1 opacity-60 hover:opacity-100">×</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <Input
+                            type="text"
+                            value={inputValue}
+                            onChange={e => {
+                                setInputValue(e.target.value);
+                                const newFromInput = e.target.value.split(" ").filter(Boolean);
+                                set("crawlerSettings", [...tags, ...newFromInput].join(" "));
+                            }}
+                            placeholder="Укажите элементы, которые следует исключить из парсинга"
+                            className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+                        />
+                    </CardContent>
+                </Card>
+
+                {/* Appearance */}
+                <Card className="bg-card border-border">
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                            <Palette className="w-4 h-4 text-primary" />
+                            Внешний вид
+                        </CardTitle>
+                        <CardDescription className="text-md">Цвет виджета на сайте</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        <div className="grid grid-cols-2 gap-4">
+                            {/* Основной цвет */}
+                            <ColorField
+                                label="Основной цвет (акцент)"
+                                value={form.accentColor || "#01696f"}
+                                placeholder="#01696f"
+                                onChange={(v) => set("accentColor", v)}
+                            />
+
+                            {/* Фон окна чата */}
+                            <ColorField
+                                label="Фон диалогового окна"
+                                value={form.chatBgColor || "#f8f8f8"}
+                                placeholder="#f8f8f8"
+                                onChange={(v) => set("chatBgColor", v)}
+                            />
+                        </div>
+
+                        {/* Сообщения пользователя */}
+                        <div>
+                            <CardDescription className="text-md pb-2">Сообщения пользователя</CardDescription>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <ColorField
+                                    label="Фон сообщения"
+                                    value={form.userBubbleBg || "#01696f"}
+                                    placeholder="#01696f"
+                                    onChange={(v) => set("userBubbleBg", v)}
+                                />
+                                <ColorField
+                                    label="Цвет текста"
+                                    value={form.userTextColor || "#ffffff"}
+                                    placeholder="#ffffff"
+                                    onChange={(v) => set("userTextColor", v)}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Сообщения бота */}
+                        <div>
+                            <CardDescription className="text-md pb-2">Сообщения бота</CardDescription>
+                            <div className="grid grid-cols-2 gap-4">
+                                <ColorField
+                                    label="Фон сообщения"
+                                    value={form.botBubbleBg || "#ffffff"}
+                                    placeholder="#ffffff"
+                                    onChange={(v) => set("botBubbleBg", v)}
+                                />
+                                <ColorField
+                                    label="Цвет текста"
+                                    value={form.botTextColor || "#222222"}
+                                    placeholder="#222222"
+                                    onChange={(v) => set("botTextColor", v)}
+                                />
+                            </div>
+                        </div>
 
 
-  function getTagClass(tag: string) {
-    if (tag.startsWith('.')) return 'bg-primary/20 text-primary border-primary/30';                              //class-item class
-    if (tag.startsWith('#')) return 'bg-[rgba(255,232,0,0.2)] border-[rgba(177,156,0,0.3)] text-yellow-700'; //id-item class
-    return 'bg-[rgba(0,48,182,0.2)] text-[hsl(216.7,85.9%,41.8%)] border-blue-800/50';                       //tag-item class
-  }
+                        {/* Предпросмотр */}
+                        <Button
+                            onClick={() => openChat(form)}
+                            className="bg-primary hover:bg-primary/90 gap-2"
+                            style={{ background: form.accentColor || "#01696f" }}
+                            title="Открыть тестовый чат"
+                        >
+                            <Play className="w-3.5 h-3.5" />
+                            Предпросмотр
+                        </Button>
+                    </CardContent>
+                </Card>
 
-  function handleTagDelete(index: number) {
-    const newTags = tags.filter((_, i) => i !== index);
-    setTags(newTags);
-    const value = newTags.join(" ");
-    set("crawlerSettings", value);
-  }
-
-  if (isLoading) return <div className="p-8 text-muted-foreground">Загрузка...</div>;
-
-  return (
-    <div className="p-8 max-w-2xl">
-      <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground flex items-center gap-2">
-          <Settings className="w-5 h-5 text-primary" />
-          Настройки виджета
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Конфигурация AI-помощника и параметры отображения
-        </p>
-      </div>
-
-      <div className="space-y-5">
-        {/* OpenAI */}
-        <Card className="bg-card border-border">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Key className="w-4 h-4 text-primary" />
-              OpenAI API
-            </CardTitle>
-            <CardDescription>Ключ для доступа к OpenAI API</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div>
-              <Label className="text-xs text-muted-foreground mb-1.5 block">API Ключ</Label>
-              <div className="relative">
-                <Input
-                  data-testid="input-api-key"
-                  type={showKey ? "text" : "password"}
-                  value={form.openaiKey || ""}
-                  onChange={e => set("openaiKey", e.target.value)}
-                  placeholder="sk-..."
-                  className="bg-muted border-border text-foreground pr-10 placeholder:text-muted-foreground"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowKey(!showKey)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                {/* Save button */}
+                <Button
+                    data-testid="button-save-settings"
+                    onClick={handleSave}
+                    disabled={update.isPending}
+                    className="w-full bg-[#01696f] hover:bg-[#01696f]/90 gap-2"
                 >
-                  {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground mb-1.5 block">Модель</Label>
-              <Select value={form.model || "gpt-4o"} onValueChange={v => set("model", v)}>
-                <SelectTrigger data-testid="select-model" className="bg-muted border-border text-foreground">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border">
-                  <SelectItem value="gpt-4o">GPT-4o (рекомендуется)</SelectItem>
-                  <SelectItem value="gpt-4o-mini">GPT-4o Mini (быстрее, дешевле)</SelectItem>
-                  <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
-                  <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Bot identity */}
-
-        <Card className="bg-card border-border">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Bot className="w-4 h-4 text-primary" />
-              Личность бота
-            </CardTitle>
-            <CardDescription>Как бот представляется пользователям</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div>
-              <Label className="text-xs text-muted-foreground mb-1.5 block">Имя бота</Label>
-              <Input
-                data-testid="input-bot-name"
-                value={form.botName || ""}
-                onChange={e => set("botName", e.target.value)}
-                placeholder="Помощник"
-                className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground mb-1.5 block">Приветственное сообщение</Label>
-              <Input
-                data-testid="input-welcome"
-                value={form.welcomeMessage || ""}
-                onChange={e => set("welcomeMessage", e.target.value)}
-                placeholder="Привет! Чем могу помочь?"
-                className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground mb-1.5 block">Язык ответов</Label>
-              <Select value={form.language || "ru"} onValueChange={v => set("language", v)}>
-                <SelectTrigger data-testid="select-language" className="bg-muted border-border text-foreground">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border">
-                  <SelectItem value="ru">Русский</SelectItem>
-                  <SelectItem value="en">English</SelectItem>
-                  <SelectItem value="uk">Українська</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground mb-1.5 block">
-                Системный промпт
-              </Label>
-              <Textarea
-                data-testid="input-system-prompt"
-                value={form.systemPrompt ?? ""}
-                onChange={(e) => set("systemPrompt", e.target.value)}
-                placeholder="Ты — {botName}, AI-помощник университета. Отвечай на языке {language}. Будь вежливым, кратким и полезным."
-                className="min-h-[140px] bg-muted border-border text-foreground placeholder:text-muted-foreground"
-              />
-              <p className="mt-1 text-xs text-muted-foreground">
-                Инструкция для GPT-модели. Можно использовать переменные:
-                <code className="mx-1 rounded border border-border bg-background px-1 py-0.5">
-                  {"{bot_name}"}
-                </code>
-                и
-                <code className="ml-1 rounded border border-border bg-background px-1 py-0.5">
-                  {"{language}"}
-                </code>
-                .
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Crawler settings */}
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Settings className="w-4 h-4 text-primary" />
-              Настройки парсинга
-            </CardTitle>
-            <CardDescription>
-              Укажите <code className="bg-[rgba(0,48,182,0.2)] text-[hsl(216.7,85.9%,41.8%)] border-blue-800/50 border rounded-md p-1">теги</code>
-              , <code className="bg-primary/20 text-primary border-primary/30 border rounded-md p-1">.классы</code>
-              , <code className="bg-[rgba(255,232,0,0.2)] border-[rgba(177,156,0,0.3)] text-yellow-700 border rounded-md p-1">#id</code>
-              , которые следует игнорировать
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="min-h-[26px] mb-3">
-              {/* Теги */}
-              {tags.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {tags.map((tag, i) => (
-                  <div key={i} className={`flex border items-center gap-1 p-1 cursor-pointer rounded-md text-xs font-mono
-                    ${getTagClass(tag)}`}
-                  >
-                    <span>{tag}</span>
-                    <button type="button" onClick={() => handleTagDelete(i)}
-                      className="ml-1 opacity-60 hover:opacity-100">×</button>
-                  </div>
-                ))}
-              </div>
-            )}
-            </div>
-            <Input
-              type="text"
-              value={inputValue}
-              onChange={e => {
-                setInputValue(e.target.value);
-                const newFromInput = e.target.value.split(" ").filter(Boolean);
-                set("crawlerSettings", [...tags, ...newFromInput].join(" "));
-              }}
-              placeholder="Укажите элементы, которые следует исключить из парсинга"
-              className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
-            />
-          </CardContent>
-        </Card>
-
-        {/* Appearance */}
-        <Card className="bg-card border-border">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Palette className="w-4 h-4 text-primary" />
-              Внешний вид
-            </CardTitle>
-            <CardDescription className="text-md">Цвет виджета на сайте</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              {/* Основной цвет */}
-              <ColorField
-                label="Основной цвет (акцент)"
-                value={form.accentColor || "#01696f"}
-                placeholder="#01696f"
-                onChange={(v) => set("accentColor", v)}
-              />
-
-              {/* Фон окна чата */}
-              <ColorField
-                label="Фон диалогового окна"
-                value={form.chatBgColor || "#f8f8f8"}
-                placeholder="#f8f8f8"
-                onChange={(v) => set("chatBgColor", v)}
-              />
-            </div>
-
-            {/* Сообщения пользователя */}
-            <div>
-              <CardDescription className="text-md pb-2">Сообщения пользователя</CardDescription>
-
-              <div className="grid grid-cols-2 gap-4">
-                <ColorField
-                  label="Фон сообщения"
-                  value={form.userBubbleBg || "#01696f"}
-                  placeholder="#01696f"
-                  onChange={(v) => set("userBubbleBg", v)}
-                />
-                <ColorField
-                  label="Цвет текста"
-                  value={form.userTextColor || "#ffffff"}
-                  placeholder="#ffffff"
-                  onChange={(v) => set("userTextColor", v)}
-                />
-              </div>
-            </div>
-
-            {/* Сообщения бота */}
-            <div>
-              <CardDescription className="text-md pb-2">Сообщения бота</CardDescription>
-              <div className="grid grid-cols-2 gap-4">
-                <ColorField
-                  label="Фон сообщения"
-                  value={form.botBubbleBg || "#ffffff"}
-                  placeholder="#ffffff"
-                  onChange={(v) => set("botBubbleBg", v)}
-                />
-                <ColorField
-                  label="Цвет текста"
-                  value={form.botTextColor || "#222222"}
-                  placeholder="#222222"
-                  onChange={(v) => set("botTextColor", v)}
-                />
-              </div>
-            </div>
-            
-
-            {/* Предпросмотр */}
-            <Button
-                  onClick={() => openChat(form)}
-                  className="bg-primary hover:bg-primary/90 gap-2"
-                  style={{ background: form.accentColor || "#01696f" }}
-                  title="Открыть тестовый чат"
-                >
-                  <Play className="w-3.5 h-3.5" />
-                  Предпросмотр
+                    <Save className="w-4 h-4" />
+                    {update.isPending ? "Сохранение..." : "Сохранить настройки"}
                 </Button>
-          </CardContent>
-        </Card>
-
-        {/* Save button */}
-        <Button
-          data-testid="button-save-settings"
-          onClick={() => update.mutate(form)}
-          disabled={update.isPending}
-          className="w-full bg-[#01696f] hover:bg-[#01696f]/90 gap-2"
-        >
-          <Save className="w-4 h-4" />
-          {update.isPending ? "Сохранение..." : "Сохранить настройки"}
-        </Button>
-      </div>
-    </div>
-  );
+            </div>
+        </div>
+    );
 }
