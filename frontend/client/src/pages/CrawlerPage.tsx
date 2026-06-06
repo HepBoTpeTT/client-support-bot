@@ -94,7 +94,7 @@ export default function CrawlerPage() {
             qc.invalidateQueries({ queryKey: ["/api/crawl/sessions"] });
         },
         onError: (e: any) => {
-            toast({ title: "Ошибка", description: e.message, variant: "destructive" });
+            toast({ title: e.message.startsWith("409") ? "Парсинг уже запущен" : e.message, variant: "destructive" });
         },
     });
 

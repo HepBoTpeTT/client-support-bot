@@ -256,16 +256,29 @@ def update_settings(data: SettingsUpdate, db: Session = Depends(get_db)):
 # ──────────────────────────────────────────────────────────
 
 @app.post("/api/crawl/start")
-async def start_crawl(
+async def startcrawl(
     req: CrawlStartRequest,
-    background_tasks: BackgroundTasks,
+    backgroundtasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    if not req.url.strip():
-        raise HTTPException(status_code=400, detail="URL обязателен")
+    url = (req.url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL required")
+
+    running = (
+        db.query(CrawlSession)
+        .filter(CrawlSession.status == "running")
+        .order_by(desc(CrawlSession.id))
+        .first()
+    )
+    if running:
+        raise HTTPException(
+            status_code=409,
+            detail="Crawling already started",
+        )
 
     session = CrawlSession(
-        target_url=req.url,
+        target_url=url,
         status="running",
         pages_found=0,
         pages_done=0,
@@ -274,51 +287,63 @@ async def start_crawl(
     db.add(session)
     db.commit()
     db.refresh(session)
-    session_id = session.id
+    sessionid = session.id
 
-    # Save URL to settings
     s = db.query(SettingsModel).first()
     if s:
-        s.target_url = req.url
+        s.target_url = url
         db.commit()
 
-    def run_crawl_sync():
-        crawl_db = SessionLocal()
+    def runcrawlsync():
+        crawldb = SessionLocal()
         try:
-            crawl_site(session_id, req.url, crawl_db)
+            crawl_site(sessionid, url, crawldb)
 
-            sess = crawl_db.get(CrawlSession, session_id)
+            sess = crawldb.get(CrawlSession, sessionid)
             pages_done = sess.pages_done if sess else 0
+            crawldb.execute(
+                text("""
+                    UPDATE stats
+                    SET total_crawl_runs = total_crawl_runs + 1,
+                        max_pages_in_run = GREATEST(max_pages_in_run, :pages)
+                    WHERE id = 1
+                """),
+                {"pages": pages_done},
+            )
+            crawldb.commit()
 
-            crawl_db.execute(text("""
-                UPDATE stats SET
-                    total_crawl_runs = total_crawl_runs + 1,
-                    max_pages_in_run = GREATEST(max_pages_in_run, :pages)
-                WHERE id = 1
-            """), {"pages": pages_done})
-            crawl_db.commit()
         except Exception as e:
             logger.error(f"Crawl error: {e}")
             logger.error(traceback.format_exc())
-            sess = crawl_db.get(CrawlSession, session_id)
+            sess = crawldb.get(CrawlSession, sessionid)
             if sess:
                 sess.status = "error"
                 sess.error_message = str(e)
                 sess.finished_at = datetime.now(timezone.utc)
-                crawl_db.commit()
+                crawldb.commit()
         finally:
-            crawl_db.close()
+            crawldb.close()
 
-    t = threading.Thread(target=run_crawl_sync, daemon=True)
+    t = threading.Thread(target=runcrawlsync, daemon=True)
     t.start()
-    return {"sessionId": session_id, "status": "running"}
 
+    return {"sessionId": sessionid, "status": "running"}
 
 @app.get("/api/crawl/status")
-def get_crawl_status(db: Session = Depends(get_db)):
-    session = db.query(CrawlSession).order_by(desc(CrawlSession.id)).first()
+def getcrawlstatus(db: Session = Depends(get_db)):
+    session = (
+        db.query(CrawlSession)
+        .filter(CrawlSession.status == "running")
+        .order_by(desc(CrawlSession.id))
+        .first()
+    )
+
+    if not session:
+        session = db.query(CrawlSession).order_by(desc(CrawlSession.id)).first()
+
     if not session:
         return {"status": "idle"}
+
     return {
         "id": session.id,
         "targetUrl": session.target_url,
