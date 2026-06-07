@@ -98,11 +98,21 @@ export default function CrawlerPage() {
         },
     });
 
-    const handleStart = () => {
+    const handleStart = async () => {
         if (!url.trim()) {
             toast({ title: "Введите URL сайта", variant: "destructive" });
             return;
         }
+
+        const ok = await confirm({
+            title: "Начать парсинг?",
+            description: "Действие невозможно отменить. Оно приведёт к принудительной очистке базы знаний.",
+            confirmText: "Начать",
+            cancelText: "Отмена",
+            variant: "destructive",
+        });
+
+        if (!ok) return;
         // Save URL to settings
         apiRequest("PATCH", "/api/settings", { targetUrl: url });
         startCrawl.mutate(url);

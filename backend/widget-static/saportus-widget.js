@@ -119,7 +119,19 @@
             function addMessage(role, text) {
                 var el = document.createElement('div');
                 el.className = 'sa-msg ' + role;
-                el.textContent = text;
+
+                if (role === 'bot typing') {
+                    el.innerHTML = `
+                        <span class="sa-typing-dots" aria-label="Бот печатает">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </span>
+                    `;
+                } else {
+                    el.textContent = text;
+                }
+
                 messagesEl.appendChild(el);
                 messagesEl.scrollTop = messagesEl.scrollHeight;
                 return el;
@@ -144,15 +156,16 @@
                         body: JSON.stringify({ message: text, session_id: sessionId })
                     });
                     var data = await r.json();
-                    typingEl.remove();
                     if (!r.ok) {
-                        addMessage('bot', 'Извините, не могу ответить прямо сейчас. Попробуйте позже.');
+                        typingEl.classList.remove("typing");
+                        typingEl.textContent = 'Извините, не могу ответить прямо сейчас. Попробуйте позже.';
                     } else {
-                        addMessage('bot', data.reply || 'Извините, не могу ответить прямо сейчас.');
+                        typingEl.classList.remove("typing");
+                        typingEl.textContent = data.reply || 'Извините, не могу ответить прямо сейчас.';
                     }
                 } catch (e) {
-                    typingEl.remove();
-                    addMessage('bot', 'Ошибка соединения с сервером.');
+                    typingEl.classList.remove("typing");
+                    typingEl.textContent = 'Ошибка соединения с сервером.';
                 }
                 sendBtn.disabled = false;
                 input.focus();
