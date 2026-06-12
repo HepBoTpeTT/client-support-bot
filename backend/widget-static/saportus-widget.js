@@ -146,7 +146,6 @@
                 if (!text) return;
                 input.value = '';
                 input.style.height = '38px';
-                sendBtn.disabled = true;
                 addMessage('user', text);
                 var typingEl = addMessage('bot typing', '...');
                 try {
@@ -167,7 +166,6 @@
                     typingEl.classList.remove("typing");
                     typingEl.textContent = 'Ошибка соединения с сервером.';
                 }
-                sendBtn.disabled = false;
                 input.focus();
             }
 
@@ -177,7 +175,6 @@
                 if (!text) return;
                 input.value = '';
                 input.style.height = '38px';
-                sendBtn.disabled = true;
                 addMessage('user', text);
                 try {
                     await fetch(baseUrl + '/api/operator/user-message', {
@@ -186,7 +183,6 @@
                         body: JSON.stringify({ session_id: sessionId, message: text })
                     });
                 } catch (e) { }
-                sendBtn.disabled = false;
                 input.focus();
             }
 
