@@ -24,7 +24,7 @@ from crawler import crawl_site, search_chunks
 from database import get_db, init_db, SessionLocal, engine
 from models import (
     Settings as SettingsModel, Page, Chunk, Dialog,
-    CrawlSession, Achievement, DailyTask,
+    CrawlSession, Achievement, DailyTask, Stats,
     # OperatorSession, OperatorMessage,
 )
 from qdrant_store import search_similar, clear_collection
@@ -46,6 +46,7 @@ logging.getLogger("hpack").setLevel(logging.WARNING)
 from fastembed import TextEmbedding
 for m in TextEmbedding.list_supported_models():
     logger.info(m["model"])
+
 
 
 @asynccontextmanager
@@ -238,6 +239,9 @@ def update_settings(data: SettingsUpdate, db: Session = Depends(get_db)):
 
     if "openai_key" in update_data and update_data["openai_key"].startswith("••••"):
         update_data.pop("openai_key")
+    
+    if update_data.get("target_url", None) == "":
+        update_data.pop("target_url")
 
     for field, value in update_data.items():
         setattr(s, field, value)
@@ -252,16 +256,29 @@ def update_settings(data: SettingsUpdate, db: Session = Depends(get_db)):
 # ──────────────────────────────────────────────────────────
 
 @app.post("/api/crawl/start")
-async def start_crawl(
+async def startcrawl(
     req: CrawlStartRequest,
-    background_tasks: BackgroundTasks,
+    backgroundtasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    if not req.url.strip():
-        raise HTTPException(status_code=400, detail="URL обязателен")
+    url = (req.url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL required")
+
+    running = (
+        db.query(CrawlSession)
+        .filter(CrawlSession.status == "running")
+        .order_by(desc(CrawlSession.id))
+        .first()
+    )
+    if running:
+        raise HTTPException(
+            status_code=409,
+            detail="Crawling already started",
+        )
 
     session = CrawlSession(
-        target_url=req.url,
+        target_url=url,
         status="running",
         pages_found=0,
         pages_done=0,
@@ -270,40 +287,63 @@ async def start_crawl(
     db.add(session)
     db.commit()
     db.refresh(session)
-    session_id = session.id
+    sessionid = session.id
 
-    # Save URL to settings
     s = db.query(SettingsModel).first()
     if s:
-        s.target_url = req.url
+        s.target_url = url
         db.commit()
 
-    def run_crawl_sync():
-        crawl_db = SessionLocal()
+    def runcrawlsync():
+        crawldb = SessionLocal()
         try:
-            crawl_site(session_id, req.url, crawl_db)
+            crawl_site(sessionid, url, crawldb)
+
+            sess = crawldb.get(CrawlSession, sessionid)
+            pages_done = sess.pages_done if sess else 0
+            crawldb.execute(
+                text("""
+                    UPDATE stats
+                    SET total_crawl_runs = total_crawl_runs + 1,
+                        max_pages_in_run = GREATEST(max_pages_in_run, :pages)
+                    WHERE id = 1
+                """),
+                {"pages": pages_done},
+            )
+            crawldb.commit()
+
         except Exception as e:
             logger.error(f"Crawl error: {e}")
             logger.error(traceback.format_exc())
-            sess = crawl_db.get(CrawlSession, session_id)
+            sess = crawldb.get(CrawlSession, sessionid)
             if sess:
                 sess.status = "error"
                 sess.error_message = str(e)
                 sess.finished_at = datetime.now(timezone.utc)
-                crawl_db.commit()
+                crawldb.commit()
         finally:
-            crawl_db.close()
+            crawldb.close()
 
-    t = threading.Thread(target=run_crawl_sync, daemon=True)
+    t = threading.Thread(target=runcrawlsync, daemon=True)
     t.start()
-    return {"sessionId": session_id, "status": "running"}
 
+    return {"sessionId": sessionid, "status": "running"}
 
 @app.get("/api/crawl/status")
-def get_crawl_status(db: Session = Depends(get_db)):
-    session = db.query(CrawlSession).order_by(desc(CrawlSession.id)).first()
+def getcrawlstatus(db: Session = Depends(get_db)):
+    session = (
+        db.query(CrawlSession)
+        .filter(CrawlSession.status == "running")
+        .order_by(desc(CrawlSession.id))
+        .first()
+    )
+
+    if not session:
+        session = db.query(CrawlSession).order_by(desc(CrawlSession.id)).first()
+
     if not session:
         return {"status": "idle"}
+
     return {
         "id": session.id,
         "targetUrl": session.target_url,
@@ -436,6 +476,24 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
         .limit(8)
         .all()
     )
+
+    db.execute(text("""
+        UPDATE stats
+        SET total_user_messages = total_user_messages + 1,
+            total_dialog_sessions = total_dialog_sessions + (
+                CASE
+                    WHEN :session_id LIKE 'sess%%'
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM dialogs
+                        WHERE session_id = :session_id
+                    )
+                    THEN 1
+                    ELSE 0
+                END
+            )
+        WHERE id = 1
+    """), {"session_id": req.session_id})
 
     db.add(Dialog(
         session_id=req.session_id,
@@ -648,6 +706,24 @@ def request_operator(req: ChatRequest, db: Session = Depends(get_db)):
 
     next_event = EVENT_HANDOFF_REOPENED if last_event and last_event.event_type == EVENT_HANDOFF_CLOSED else EVENT_HANDOFF_REQUESTED
 
+    db.execute(text("""
+        UPDATE stats
+        SET total_operator_requested = total_operator_requested + (
+            CASE
+                WHEN :session_id LIKE 'sess%%'
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM dialogs
+                    WHERE session_id = :session_id
+                    AND event_type IN ('handoff_requested', 'handoff_reopened')
+                )
+                THEN 1
+                ELSE 0
+            END
+        )
+        WHERE id = 1
+    """), {"session_id": req.session_id})
+
     db.add(Dialog(
         session_id=req.session_id,
         role=ROLE_SYSTEM,
@@ -666,6 +742,7 @@ def request_operator(req: ChatRequest, db: Session = Depends(get_db)):
         ))
 
     db.commit()
+
     return {"ok": True, "status": "pending"}
 
 @app.post("/api/operator/user-message")
@@ -843,6 +920,25 @@ def operator_send(req: OperatorSendRequest, db: Session = Depends(get_db)):
             created_at=datetime.now(timezone.utc),
         ))
 
+    db.execute(text("""
+        UPDATE stats
+        SET total_operator_answered = total_operator_answered + (
+            CASE
+                WHEN :session_id LIKE 'sess%%'
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM dialogs
+                    WHERE session_id = :session_id
+                    AND role = 'operator'
+                    AND event_type = 'message'
+                )
+                THEN 1
+                ELSE 0
+            END
+        )
+        WHERE id = 1
+    """), {"session_id": req.session_id})
+
     db.add(Dialog(
         session_id=req.session_id,
         role=ROLE_OPERATOR,
@@ -942,29 +1038,6 @@ def get_last_handoff_start(session_id: str, db: Session) -> Dialog | None:
         .first()
     )
 
-def get_operator_status(session_id: str, db: Session) -> str:
-    last_start = get_last_handoff_start(session_id, db)
-    if not last_start:
-        return "none"
-
-    has_close = db.query(Dialog).filter(
-        Dialog.session_id == session_id,
-        Dialog.event_type == EVENT_HANDOFF_CLOSED,
-        happened_after(last_start),
-    ).count() > 0
-
-    if has_close:
-        return "closed"
-
-    has_operator_reply = db.query(Dialog).filter(
-        Dialog.session_id == session_id,
-        Dialog.role == ROLE_OPERATOR,
-        Dialog.event_type == EVENT_MESSAGE,
-        happened_after(last_start),
-    ).count() > 0
-
-    return "active" if has_operator_reply else "pending"
-
 def get_last_dialog_entry(session_id: str, db: Session) -> Dialog | None:
     return (
         db.query(Dialog)
@@ -1007,7 +1080,7 @@ ACHIEVEMENT_CATALOGUE = [
     ("crawl_20",           "🌠", "20 запусков",            "Запустите парсинг 20 раз",                   "crawler"),
     ("pages_10",           "📚", "10 страниц",             "Парсинг 10+ страниц за раз",          "crawler"),
     ("pages_50",           "📖", "50 страниц",             "Парсинг 50+ страниц за раз",          "crawler"),
-    ("pages_200",          "🏆", "200 страниц",            "Полный парсинг 200 страниц",             "crawler"),
+    ("pages_200",          "🏆", "200 страниц",            "Парсинг 200 страниц за раз",             "crawler"),
     ("first_dialog",       "💬", "Первый диалог",          "Первый пользователь написал боту",     "dialogs"),
     ("dialogs_10",         "🗨️", "10 диалогов",            "Бот ответил на 10 сессий",                "dialogs"),
     ("dialogs_50",         "📞", "50 диалогов",            "Бот ответил на 50 сессий",                "dialogs"),
@@ -1048,53 +1121,56 @@ def count_answered_operator_sessions(db: Session) -> int:
 
 
 def check_achievements(db: Session) -> list[str]:
-    """Re-evaluate all threshold achievements. Returns list of newly unlocked keys."""
     newly = []
 
-    crawl_count = db.query(CrawlSession).filter(CrawlSession.status == "done").count()
-    last_crawl = db.query(CrawlSession).filter(CrawlSession.status == "done").order_by(desc(CrawlSession.id)).first()
-    max_pages = last_crawl.pages_done if last_crawl else 0
-
-    dialog_sessions = db.query(Dialog.session_id).distinct().count()
-    total_messages = db.query(Dialog).filter(
-        Dialog.role == ROLE_USER,
-        Dialog.event_type == EVENT_MESSAGE,
-    ).count()
-
-    operator_requested_sessions = db.query(Dialog.session_id).filter(
-        Dialog.event_type.in_([
-            EVENT_HANDOFF_REQUESTED,
-            EVENT_HANDOFF_REOPENED,
-        ])
-    ).distinct().count()
-
-    operator_answered_sessions = db.query(Dialog.session_id).filter(
-        Dialog.role == ROLE_OPERATOR,
-        Dialog.event_type == EVENT_MESSAGE,
-    ).distinct().count()
-
+    stats = db.query(Stats).filter(Stats.id == 1).first()
     s = db.query(SettingsModel).first()
 
+    crawl_runs  = stats.total_crawl_runs if stats else 0
+    max_pages   = stats.max_pages_in_run if stats else 0
+    dialogs     = stats.total_dialog_sessions if stats else 0
+    messages    = stats.total_user_messages if stats else 0
+    op_req      = stats.total_operator_requested if stats else 0
+    op_ans      = stats.total_operator_answered if stats else 0
+
+    logger.warning(
+        "ACH_CHECK stats=%s crawl_runs=%s max_pages=%s dialogs=%s messages=%s op_req=%s op_ans=%s",
+        bool(stats), crawl_runs, max_pages, dialogs, messages, op_req, op_ans
+    )
+
+    rows = db.execute(text("""
+        SELECT completed_date, COUNT(DISTINCT task_key) as cnt
+        FROM daily_tasks
+        GROUP BY completed_date
+        HAVING cnt >= :total
+        ORDER BY completed_date DESC
+    """), {"total": len(DAILY_TASK_DEFS)}).fetchall()
+    streak = 0
+    check_date = date.today()
+    date_set = {r[0] for r in rows}
+    while check_date.strftime("%Y-%m-%d") in date_set:
+        streak += 1
+        check_date -= timedelta(days=1)
+
     checks = [
-        ("first_crawl", crawl_count >= 1),
-        ("crawl_5", crawl_count >= 5),
-        ("crawl_20", crawl_count >= 20),
-        ("pages_10", max_pages >= 10),
-        ("pages_50", max_pages >= 50),
-        ("pages_200", max_pages >= 200),
-
-        ("first_dialog", dialog_sessions >= 1),
-        ("dialogs_10", dialog_sessions >= 10),
-        ("dialogs_50", dialog_sessions >= 50),
-        ("dialogs_200", dialog_sessions >= 200),
-        ("messages_100", total_messages >= 100),
-        ("messages_1000", total_messages >= 1000),
-
-        ("first_operator", operator_requested_sessions >= 1),
-        ("operator_10", operator_answered_sessions >= 10),
-        ("operator_50", operator_answered_sessions >= 50),
-
+        ("first_crawl",         crawl_runs >= 1),
+        ("crawl_5",             crawl_runs >= 5),
+        ("crawl_20",            crawl_runs >= 20),
+        ("pages_10",            max_pages >= 10),
+        ("pages_50",            max_pages >= 50),
+        ("pages_200",           max_pages >= 200),
+        ("first_dialog",        dialogs >= 1),
+        ("dialogs_10",          dialogs >= 10),
+        ("dialogs_50",          dialogs >= 50),
+        ("dialogs_200",         dialogs >= 200),
+        ("messages_100",        messages >= 100),
+        ("messages_1000",       messages >= 1000),
+        ("first_operator",      op_req >= 1),
+        ("operator_10",         op_ans >= 10),
+        ("operator_50",         op_ans >= 50),
         ("settings_configured", bool(s and s.openai_key and s.bot_name and s.target_url)),
+        ("daily_7",             streak >= 7),
+        ("daily_30",            streak >= 30),
     ]
 
     for key, condition in checks:
@@ -1102,7 +1178,6 @@ def check_achievements(db: Session) -> list[str]:
             newly.append(key)
 
     return newly
-
 class CompleteTaskRequest(BaseModel):
     task_key: str
 
@@ -1217,7 +1292,6 @@ def complete_daily_task(req: CompleteTaskRequest, db: Session = Depends(get_db))
         if streak >= 30:
             try_unlock(db, "daily_30")
 
-    check_achievements(db)
     return {"ok": True}
 
 

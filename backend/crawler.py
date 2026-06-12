@@ -91,25 +91,27 @@ def parse_html(html: str, base_url: str, db: Session) -> tuple[str, str, list[st
     crawler_settings = s.crawler_settings if s else ""
     user_items = crawler_settings.split() if crawler_settings else []
 
-    extra_tags    = [x for x in user_items if not x.startswith('.') and not x.startswith('#')]
-    extra_classes = [x[1:] for x in user_items if x.startswith('.')]
-    extra_ids     = [x[1:] for x in user_items if x.startswith('#')]
+    extra_tags = [x for x in user_items if not x.startswith('.') and not x.startswith('#')]
+    css_selectors = [x for x in user_items if x.startswith('.') or x.startswith('#') or '[' in x or ' ' in x or '>' in x or ':' in x]
 
     # Удаляем по тегам
     if extra_tags:
         for t in soup(extra_tags):
             t.decompose()
 
-    # Удаляем по классам и id — через список, не во время итерации
+    # Удаляем по CSS-селекторам
     to_remove = []
-    for t in soup.find_all(True):
-        if not hasattr(t, 'attrs') or not t.attrs:
+    seen_tags = set()
+
+    for selector in css_selectors:
+        try:
+            for t in soup.select(selector):
+                key = id(t)
+                if key not in seen_tags:
+                    seen_tags.add(key)
+                    to_remove.append(t)
+        except Exception:
             continue
-        classes = " ".join(t.get("class", [])).lower()
-        tag_id  = (t.get("id") or "").lower()
-        if (any(x in classes for x in extra_classes) or
-                any(x == tag_id for x in extra_ids)):
-            to_remove.append(t)
 
     for t in to_remove:
         t.decompose()

@@ -27,6 +27,8 @@ interface Dialog {
   createdAt: string;
 }
 
+document.title = "История диалогов"
+
 export default function DialogsPage() {
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const { toast } = useToast();
@@ -202,7 +204,7 @@ export default function DialogsPage() {
         <Card className="col-span-3 bg-card border-border flex flex-col overflow-y-auto">
           <CardHeader className="pb-3 border-b border-border flex-shrink-0">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              {selectedSession ? `Диалог: ${selectedSession.slice(0, 24)}...` : "Выберите сессию"}
+              {selectedSession ? `Диалог: ${selectedSession}` : "Выберите сессию"}
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0 flex-1 overflow-hidden">

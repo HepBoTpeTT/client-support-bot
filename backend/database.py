@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from config import settings
 import logging
@@ -28,11 +28,10 @@ def get_db():
 
 
 def init_db():
-    from models import Settings, Page, Chunk, Dialog, CrawlSession  # noqa
+    from models import Settings, Page, Chunk, Dialog, CrawlSession, Achievement, DailyTask, Stats  # noqa
     from qdrant_store import init_collection
     Base.metadata.create_all(bind=engine)
 
-    # Seed default settings if empty
     db = SessionLocal()
     try:
         if not db.query(Settings).first():
@@ -45,8 +44,12 @@ def init_db():
                 target_url="",
                 model="gpt-4o",
             ))
-            db.commit()
             logger.info("Default settings seeded")
+            db.commit()
+        if not db.query(Stats).filter(Stats.id == 1).first():
+            db.add(Stats(id=1))
+            logger.info("Default stats row seeded")
+            db.commit()
     finally:
         db.close()
     init_collection()
