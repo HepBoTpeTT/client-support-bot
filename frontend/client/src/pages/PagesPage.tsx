@@ -59,7 +59,6 @@ export default function PagesPage() {
         mutationFn: (id: number) => apiRequest("DELETE", `/api/pages/${id}`),
         onSuccess: () => {
             toast({ title: "Страница удалена" });
-            qc.invalidateQueries({ queryKey: ["/api/pages"] });
         },
     });
 
@@ -67,7 +66,6 @@ export default function PagesPage() {
         mutationFn: () => apiRequest("DELETE", "/api/pages"),
         onSuccess: () => {
             toast({ title: "База знаний очищена" });
-            qc.invalidateQueries({ queryKey: ["/api/pages"] });
         },
     });
 

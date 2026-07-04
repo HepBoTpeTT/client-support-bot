@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { useHashLocation } from "wouter/use-hash-location";
+import { useLocation } from "wouter";
 import {
     Globe, Table2, MessageSquare, Settings, Code2, Bot, ChevronRight,
     Headphones, Sun, Moon, Trophy, MessageCircle,
@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { useTheme, useChatPanel } from "@/App";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
-
+import { useSSE } from "@/hooks/use-sse";
 
 
 const navItems = [
@@ -24,29 +24,33 @@ const navItems = [
 export default function Layout({ children }: { children: React.ReactNode }) {
     const { theme, toggle } = useTheme();
     const { openChat } = useChatPanel();
-    const [location] = useHashLocation();
+    const [location] = useLocation();
 
     useEffect(() => {
-    const titles: Record<string, string> = {
-        "/": "Парсинг сайта — Saportus",
-        "/pages": "База знаний — Saportus",
-        "/dialogs": "История диалогов — Saportus",
-        "/operator": "Обращения — Saportus",
-        "/achievements": "Достижения — Saportus",
-        "/settings": "Настройки виджета — Saportus",
-        "/embed": "Код встраивания — Saportus",
-    };
+        const titles: Record<string, string> = {
+            "/": "Парсинг сайта — Saportus",
+            "/pages": "База знаний — Saportus",
+            "/dialogs": "История диалогов — Saportus",
+            "/operator": "Обращения — Saportus",
+            "/achievements": "Достижения — Saportus",
+            "/settings": "Настройки виджета — Saportus",
+            "/embed": "Код встраивания — Saportus",
+        };
 
-    document.title = titles[location] || "404 NOT FOUND";
+        document.title = titles[location] || "404 NOT FOUND";
     }, [location]);
 
-    // Poll for new achievements badge
+    useSSE();
+
     const { data: gamification } = useQuery<any>({
         queryKey: ["/api/gamification"],
-        refetchInterval: 15000,
     });
     const newAchievements = gamification?.stats?.newCount ?? 0;
-    const pendingOperators = gamification?.stats?.pendingOperators ?? 0;
+
+    const { data: operatorSessions = [] } = useQuery<any[]>({
+        queryKey: ["/api/operator/sessions"],
+    });
+    const pendingOperators = operatorSessions.filter((s: any) => s.status === "pending").length;
 
     return (
         <div className="flex min-h-screen bg-background">
@@ -98,7 +102,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         return (
                             <Link key={href} href={href}>
                                 <div
-                                    data-testid={`nav-${href.replace("/", "") || "home"}`}
                                     className={cn(
                                         "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer transition-colors",
                                         active

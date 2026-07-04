@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat Widget</title>
+    <style>
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow: hidden;
+            background: transparent;
+        }
+
+        #sa-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            font-size: 13px;
+            color: #999;
+        }
+
+        #sa-root {
+            width: 100%;
+            height: 100%;
+            display: none;
+        }
+    </style>
+
+    <link id="sa-shared-css" rel="stylesheet" href="" />
+    <style id="sa-dynamic-theme"></style>
+
+    <script>
+        window.addEventListener('message', function (e) {
+            if (!e.data) return;
+
+            if (e.data.type === 'RESIZE') {
+                var w = e.data.w;
+                var body = document.body;
+                body.classList.remove('is-desktop', 'is-tablet', 'is-tablet-sm', 'is-mobile', 'is-mobile-sm');
+                if (w <= 360) body.classList.add('is-mobile-sm');
+                else if (w <= 480) body.classList.add('is-mobile');
+                else if (w <= 768) body.classList.add('is-tablet-sm');
+                else if (w <= 1024) body.classList.add('is-tablet');
+                else body.classList.add('is-desktop');
+            }
+
+            if (e.data.type === 'SA_CONFIG' && e.data.baseUrl) {
+                window.__saBaseUrl = e.data.baseUrl;
+                init();
+            }
+        });
+    </script>
+</head>
+
+<body class="in-iframe">
+    <div id="sa-loading">Загрузка...</div>
+    <div id="sa-root"></div>
+
+    <script>
+        (function () {
+            'use strict';
+
+            var baseUrl = new URLSearchParams(location.search).get('baseUrl') || '';
+            var initiated = false;
+
+            function init() {
+                baseUrl = baseUrl || window.__saBaseUrl || '';
+                if (initiated || !baseUrl) return;
+                initiated = true;
+
+                var loading = document.getElementById('sa-loading');
+                var root = document.getElementById('sa-root');
+
+                document.getElementById('sa-shared-css').href = baseUrl + '/widget-static/saportus-widget.css';
+
+                var s = document.createElement('script');
+                s.src = baseUrl + '/widget-static/saportus-widget-core.js';
+                s.onload = function () {
+                    window.SaportusCore.initWidget({
+                        baseUrl: baseUrl,
+                        root: document.getElementById('sa-root'),
+                        styleEl: document.getElementById('sa-dynamic-theme'),
+                        onReady: function () {
+                            loading.style.display = 'none';
+                            root.style.display = 'block';
+                        },
+                        onError: function () {
+                            loading.textContent = 'Не удалось загрузить виджет.';
+                        },
+                    });
+                };
+                s.onerror = function () {
+                    loading.textContent = 'Не удалось загрузить виджет.';
+                };
+                document.head.appendChild(s);
+            }
+
+            if (baseUrl) {
+                document.addEventListener('DOMContentLoaded', init);
+            }
+        })();
+    </script>
+</body>
+
+</html>

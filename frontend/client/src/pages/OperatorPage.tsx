@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { useSSE } from "@/hooks/use-sse";
+import { useOperatorWS, WsMessage } from "@/hooks/use-operator-ws";
 
 interface OperatorSession {
     id: number;
@@ -48,10 +50,11 @@ export default function OperatorPage() {
     const qc = useQueryClient();
     const { toast } = useToast();
     const bottomRef = useRef<HTMLDivElement>(null);
+    const [wsMessages, setWsMessages] = useState<WsMessage[]>([]);
+    useSSE();
 
     const { data: sessions = [], isLoading } = useQuery<OperatorSession[]>({
         queryKey: ["/api/operator/sessions"],
-        refetchInterval: 5000,
     });
 
     const { data: messages = [] } = useQuery<OperatorMessage[]>({
@@ -61,7 +64,15 @@ export default function OperatorPage() {
                 ? apiRequest("GET", `/api/operator/messages/${selectedId}`).then((r) => r.json())
                 : Promise.resolve([]),
         enabled: !!selectedId,
-        refetchInterval: 3000,
+        staleTime: 0,
+    });
+
+    useOperatorWS({
+        sessionId: selectedId,
+        onMessage: (msg) => {
+            setWsMessages((prev) => [...prev, msg]);
+            qc.invalidateQueries({ queryKey: ["/api/operator/sessions"] });
+        },
     });
 
     const sendMutation = useMutation({
@@ -72,8 +83,6 @@ export default function OperatorPage() {
             }),
         onSuccess: () => {
             setDraft("");
-            qc.invalidateQueries({ queryKey: ["/api/operator/messages", selectedId] });
-            qc.invalidateQueries({ queryKey: ["/api/operator/sessions"] });
         },
         onError: () => toast({ title: "Ошибка", description: "Не удалось отправить сообщение", variant: "destructive" }),
     });
@@ -82,16 +91,11 @@ export default function OperatorPage() {
         mutationFn: (sid: string) =>
             apiRequest("PATCH", `/api/operator/sessions/${sid}`),
         onSuccess: () => {
-            qc.invalidateQueries({ queryKey: ["/api/operator/sessions"] });
-            qc.invalidateQueries({ queryKey: ["/api/operator/messages", selectedId] });
             toast({ title: "Готово", description: "Статус сессии изменён" });
         },
     });
 
-    // Auto-scroll to bottom when messages load
-    useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [messages]);
+    
 
     const getSystemEventLabel = (msg: OperatorMessage) => {
         switch (msg.eventType) {
@@ -114,6 +118,24 @@ export default function OperatorPage() {
         if (!text || !selectedId) return;
         sendMutation.mutate(text);
     };
+
+    const liveMessages = wsMessages
+    .filter((wm) => wm.type === 'user_message' || wm.type === 'operator_message')
+    .map((wm, i) => ({
+        id: -(i + 1),
+        sessionId: selectedId!,
+        role: (wm.type === 'operator_message' ? 'operator' : 'user') as OperatorMessage['role'],
+        content: wm.content,
+        createdAt: wm.createdAt,
+        eventType: 'message' as const,
+    }));
+
+    const allMessages = [...messages, ...liveMessages];
+
+    // Auto-scroll to bottom when messages load
+    useEffect(() => {
+        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [allMessages]);
 
 
     return (
@@ -149,7 +171,6 @@ export default function OperatorPage() {
                                 <button
                                     onClick={() => qc.invalidateQueries({ queryKey: ["/api/operator/sessions"] })}
                                     className="text-muted-foreground hover:text-foreground transition-colors"
-                                    data-testid="btn-refresh-sessions"
                                 >
                                     <RefreshCw className="w-3.5 h-3.5" />
                                 </button>
@@ -174,8 +195,10 @@ export default function OperatorPage() {
                                     return (
                                         <div
                                             key={s.sessionId}
-                                            data-testid={`op-session-${i}`}
-                                            onClick={() => setSelectedId(s.sessionId)}
+                                            onClick={() => {
+                                                setSelectedId(s.sessionId);
+                                                setWsMessages([])
+                                            }}
                                             className={cn(
                                                 "p-4 border-b border-border cursor-pointer hover:bg-muted/40 transition-colors",
                                                 selectedId === s.sessionId && "bg-primary/10 border-l-2 border-l-primary"
@@ -216,7 +239,6 @@ export default function OperatorPage() {
                                 <Button
                                     size="sm"
                                     variant="outline"
-                                    data-testid="btn-toggle-session"
                                     onClick={() => closeMutation.mutate(selectedId!)}
                                     disabled={closeMutation.isPending}
                                     className={cn(
@@ -249,7 +271,7 @@ export default function OperatorPage() {
                             <>
                                 <ScrollArea className="flex-1 p-4">
                                     <div className="flex flex-col gap-3">
-                                        {messages.map((msg) => {
+                                        {allMessages.map((msg) => {
                                             const isSystemEvent = msg.eventType && msg.eventType !== "message";
                                             const systemLabel = getSystemEventLabel(msg);
 
@@ -297,7 +319,6 @@ export default function OperatorPage() {
                                 {selectedSession?.status !== "closed" && (
                                     <div className="p-3 border-t border-border flex gap-2 flex-shrink-0">
                                         <Textarea
-                                            data-testid="input-operator-reply"
                                             value={draft}
                                             onChange={(e) => setDraft(e.target.value)}
                                             onKeyDown={(e) => {
@@ -311,7 +332,6 @@ export default function OperatorPage() {
                                             rows={1}
                                         />
                                         <Button
-                                            data-testid="btn-send-operator"
                                             onClick={handleSend}
                                             disabled={!draft.trim() || sendMutation.isPending}
                                             size="sm"

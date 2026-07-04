@@ -9,8 +9,6 @@ import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/hooks/use-confirm";
 import { Globe, Play, RefreshCw, CheckCircle, AlertCircle, Clock, FileText, CheckSquare, Square, MessageSquare, ShoppingCart, Trophy, Sparkles, Trash2 } from "lucide-react";
-import { Link } from "wouter";
-import { cn } from "@/lib/utils";
 
 interface CrawlSession {
     id?: number;
@@ -38,13 +36,10 @@ export default function CrawlerPage() {
 
     const { data: crawlStatus, refetch: refetchStatus } = useQuery<CrawlSession>({
         queryKey: ["/api/crawl/status"],
-        // TanStack Query v5: callback receives { state } object, not data directly
-        refetchInterval: (query) => query.state.data?.status === "running" ? 2000 : false,
     });
 
     const { data: sessions = [] } = useQuery<CrawlSession[]>({
         queryKey: ["/api/crawl/sessions"],
-        refetchInterval: crawlStatus?.status === "running" ? 3000 : 10000,
     });
 
     // Pre-fill URL from settings
@@ -68,7 +63,6 @@ export default function CrawlerPage() {
         mutationFn: () => apiRequest("DELETE", "/api/crawl/sessions"),
         onSuccess: () => {
             toast({ title: "История очищена" });
-            qc.invalidateQueries({ queryKey: ["/api/crawl/sessions"] });
         },
     });
 
@@ -90,8 +84,6 @@ export default function CrawlerPage() {
             apiRequest("POST", "/api/crawl/start", { url: targetUrl }),
         onSuccess: () => {
             toast({ title: "Парсинг запущен", description: "Обходим страницы сайта..." });
-            qc.invalidateQueries({ queryKey: ["/api/crawl/status"] });
-            qc.invalidateQueries({ queryKey: ["/api/crawl/sessions"] });
         },
         onError: (e: any) => {
             toast({ title: e.message.startsWith("409") ? "Парсинг уже запущен" : e.message, variant: "destructive" });
@@ -150,9 +142,6 @@ export default function CrawlerPage() {
     const completeTask = useMutation({
         mutationFn: (taskKey: string) =>
             apiRequest("POST", "/api/gamification/complete-task", { task_key: taskKey }),
-        onSuccess: () => {
-            qc.invalidateQueries({ queryKey: ["/api/gamification"] });
-        },
     });
 
     const taskIconMap: Record<string, React.ReactNode> = {
@@ -177,7 +166,7 @@ export default function CrawlerPage() {
             </div>
 
             {/* Daily tasks widget */}
-            <Card className={cn(
+            {/* <Card className={cn(
                 "mb-6 border ",
                 allDone
                     ? "bg-green-50 border-green-200 dark:bg-green-900/10 dark:border-green-800/40"
@@ -263,7 +252,7 @@ export default function CrawlerPage() {
                         </p>
                     )}
                 </CardContent>
-            </Card>
+            </Card> */}
 
 
 
@@ -354,7 +343,7 @@ export default function CrawlerPage() {
             {/* History */}
             {sessions.length > 0 && (
                 <Card className="bg-card border-border">
-                    <CardHeader>
+                    <CardHeader className="pb-3">
                         <div className="flex items-center justify-between">
                             <CardTitle className="text-base flex items-center gap-2">
                                 <FileText className="w-4 h-4 text-muted-foreground" />
@@ -374,26 +363,25 @@ export default function CrawlerPage() {
                         </div>
                     </CardHeader>
                     <CardContent>
-                        <div className="space-y-2">
-                            {sessions.slice(0, 5).map((s, i) => (
-                                <div key={i} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                                    <div className="text-sm text-foreground truncate max-w-xs">{s.targetUrl}</div>
+                        {sessions.slice(0, 5).map((s, i) => {
+                            const session = i === 0 ? crawlStatus : s
+                            if (!session) return null
+                            
+                            return (
+                                <div key={i} className="flex items-center justify-between py-3 border-b border-border last:border-0">
+                                    <div className="text-sm text-foreground truncate max-w-xs">{session.targetUrl}</div>
                                     <div className="flex items-center gap-3 ml-4 flex-shrink-0">
-                                        <span className="text-xs text-muted-foreground">{s.pagesDone ?? 0} стр.</span>
+                                        <span className="text-xs text-muted-foreground">{session.pagesDone ?? 0} стр.</span>
                                         <Badge
-                                            data-testid={`status-session-${i}`}
-                                            className={`text-xs ${s.status === "done" ? "status-done" :
-                                                    s.status === "error" ? "status-error" :
-                                                        s.status === "running" ? "status-running" : "status-pending"
-                                                }`}
+                                            className={`text-xs status-${session.status}`}
                                             variant="outline"
                                         >
-                                            {statusLabel[s.status as keyof typeof statusLabel] ?? s.status}
+                                            {statusLabel[session.status as keyof typeof statusLabel] ?? session.status}
                                         </Badge>
                                     </div>
                                 </div>
-                            ))}
-                        </div>
+                            )
+                        })}
                     </CardContent>
                 </Card>
             )}
