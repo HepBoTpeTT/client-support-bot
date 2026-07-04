@@ -46,7 +46,6 @@ export default function AchievementsPage() {
 
   const markSeen = useMutation({
     mutationFn: () => apiRequest("POST", "/api/gamification/mark-seen"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/gamification"] }),
   });
 
 
@@ -131,7 +130,7 @@ export default function AchievementsPage() {
                     key={ach.key}
                     data-testid={`achievement-${ach.key}`}
                     className={cn(
-                      "relative rounded-xl border p-4 transition-all duration-200",
+                      "relative rounded-xl border p-4",
                       ach.unlocked
                         ? "bg-card border-primary/30 shadow-sm"
                         : "bg-muted/30 border-border opacity-60"

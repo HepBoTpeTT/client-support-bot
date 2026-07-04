@@ -3,7 +3,7 @@ from sqlalchemy import (
     Integer, String, Text, DateTime, ForeignKey, func, Index
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from database import Base
+from .database import Base
 
 
 class Settings(Base):

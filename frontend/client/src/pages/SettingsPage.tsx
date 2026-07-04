@@ -104,7 +104,6 @@ export default function SettingsPage() {
             setHasUserEdited(false);
 
             toast({ title: "Настройки сохранены" });
-            qc.invalidateQueries({ queryKey: ["/api/settings"] });
             setInputValue("");
         },
         onError: (e: any) => {
@@ -116,43 +115,43 @@ export default function SettingsPage() {
         const botName = (form.botName ?? "").trim();
         const welcomeMessage = (form.welcomeMessage ?? "").trim();
         const systemPrompt = (form.systemPrompt ?? "").trim();
-        const openaiKey = (form.openaiKey ?? "").trim();
+        // const openaiKey = (form.openaiKey ?? "").trim();
 
         if (!botName) {
             toast({
-            title: "Ошибка сохранения",
-            description: "Поле «Имя бота» не может быть пустым.",
-            variant: "destructive",
+                title: "Ошибка сохранения",
+                description: "Поле «Имя бота» не может быть пустым.",
+                variant: "destructive",
             });
             return;
         }
 
         if (!welcomeMessage) {
             toast({
-            title: "Ошибка сохранения",
-            description: "Поле «Приветственное сообщение» не может быть пустым.",
-            variant: "destructive",
+                title: "Ошибка сохранения",
+                description: "Поле «Приветственное сообщение» не может быть пустым.",
+                variant: "destructive",
             });
             return;
         }
 
         if (!systemPrompt) {
             toast({
-            title: "Ошибка сохранения",
-            description: "Поле «Системный промпт» не может быть пустым.",
-            variant: "destructive",
+                title: "Ошибка сохранения",
+                description: "Поле «Системный промпт» не может быть пустым.",
+                variant: "destructive",
             });
             return;
         }
 
-        if (!openaiKey) {
-            toast({
-            title: "Ошибка сохранения",
-            description: "Поле Api Ключ не может быть пустым.",
-            variant: "destructive",
-            });
-            return;
-        }
+        // if (!openaiKey) {
+        //     toast({
+        //         title: "Ошибка сохранения",
+        //         description: "Поле Api Ключ не может быть пустым.",
+        //         variant: "destructive",
+        //     });
+        //     return;
+        // }
 
         update.mutate({
             ...form,
@@ -266,12 +265,12 @@ export default function SettingsPage() {
                         </div>
                         <div>
                             <Label className="text-xs text-muted-foreground mb-1.5 block">Приветственное сообщение</Label>
-                            <Input
+                            <Textarea
                                 data-testid="input-welcome"
                                 value={form.welcomeMessage || ""}
                                 onChange={e => set("welcomeMessage", e.target.value)}
                                 placeholder="Привет! Чем могу помочь?"
-                                className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+                                className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[70px]"
                             />
                         </div>
                         <div>

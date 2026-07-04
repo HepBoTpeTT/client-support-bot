@@ -1,6 +1,9 @@
-from qdrant_client import QdrantClient, models
+from math import isclose
+
+from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from fastembed import TextEmbedding
+
 from config import settings
 
 COLLECTION_NAME = "site_chunks"
@@ -26,12 +29,19 @@ def get_model() -> TextEmbedding:
     return _model
 
 
+def embed_passage(text: str) -> list[float]:
+    return list(get_model().embed([f"passage: {text}"]))[0].tolist()
+
+
+def embed_query(text: str) -> list[float]:
+    return list(get_model().embed([f"query: {text}"]))[0].tolist()
+
+
 def init_collection() -> None:
     client = get_qdrant()
     existing = [c.name for c in client.get_collections().collections]
     if COLLECTION_NAME not in existing:
-        # Определяем размерность динамически из модели
-        vector_size = len(list(get_model().embed(["test"]))[0].tolist())
+        vector_size = len(embed_passage("test"))
         client.create_collection(
             collection_name=COLLECTION_NAME,
             vectors_config=VectorParams(
@@ -48,11 +58,14 @@ def clear_collection() -> None:
         client.delete_collection(COLLECTION_NAME)
     init_collection()
 
+
 def is_low_quality_chunk(text: str) -> bool:
-    text = text.strip()
+    text = (text or "").strip()
     if len(text) < 50:
         return True
     words = text.split()
+    if not words:
+        return True
     unique_ratio = len(set(words)) / len(words)
     if unique_ratio < 0.4 and len(words) > 30:
         return True
@@ -60,8 +73,7 @@ def is_low_quality_chunk(text: str) -> bool:
 
 
 def upsert_chunk(chunk_id: int, chunk_text: str, page_url: str, page_title: str) -> None:
-    model = get_model()
-    vector = list(model.embed([chunk_text]))[0].tolist()
+    vector = embed_passage(chunk_text)
 
     get_qdrant().upsert(
         collection_name=COLLECTION_NAME,
@@ -80,54 +92,52 @@ def upsert_chunk(chunk_id: int, chunk_text: str, page_url: str, page_title: str)
 
 
 def search_similar(query: str, limit: int = 5, score_threshold: float = 0.35) -> list[dict]:
-    vector = list(get_model().embed([query]))[0].tolist()
+    vector = embed_query(query)
+    fetch_limit = max(limit * 5, limit + 20)
 
     results = get_qdrant().search(
         collection_name=COLLECTION_NAME,
         query_vector=vector,
-        limit=limit,
+        limit=fetch_limit,
         score_threshold=score_threshold,
     )
-    for r in results:
-        print(f"Score: {r.score:.3f} | {r.payload['page_url']}")
 
+    filtered = []
     seen_texts = set()
-    unique_results = []
+
     for r in results:
-        text_key = r.payload["chunk_text"][:100]
-        if text_key not in seen_texts:
-            seen_texts.add(text_key)
-            unique_results.append(r)
-    results = unique_results
+        payload = r.payload or {}
+        chunk_text = payload.get("chunk_text", "")
+        if not chunk_text:
+            continue
+        if r.score < score_threshold:
+            continue
 
-    max_score = max((r.score for r in results), default=0)
+        text_key = chunk_text[:100]
+        if text_key in seen_texts:
+            continue
 
-    if max_score < 0.5:
-        keywords = [w for w in query.lower().split() if len(w) > 3]
-        extra_points, _ = get_qdrant().scroll(
-            collection_name=COLLECTION_NAME,
-            scroll_filter=models.Filter(
-                should=[
-                    models.FieldCondition(
-                        key="chunk_text",
-                        match=models.MatchText(text=kw)
-                    )
-                    for kw in keywords
-                ]
-            ),
-            limit=limit,
-            with_payload=True,
-            with_vectors=False,
-        )
-        existing_ids = {r.id for r in results}
-        for p in extra_points:
-            if p.id not in existing_ids:
-                # Оборачиваем в тот же формат что возвращает search()
-                results.append(type("R", (), {
-                    "id": p.id,
-                    "score": 0.0,
-                    "payload": p.payload
-                })())
+        seen_texts.add(text_key)
+        filtered.append(r)
+
+    if not filtered:
+        return []
+
+    filtered.sort(key=lambda r: r.score, reverse=True)
+
+    if len(filtered) <= limit:
+        kept = filtered
+    else:
+        cutoff_score = filtered[limit - 1].score
+        kept = []
+        for r in filtered:
+            if len(kept) < limit:
+                kept.append(r)
+                continue
+            if isclose(r.score, cutoff_score, rel_tol=1e-9, abs_tol=1e-9):
+                kept.append(r)
+            else:
+                break
 
     return [
         {
@@ -136,5 +146,5 @@ def search_similar(query: str, limit: int = 5, score_threshold: float = 0.35) ->
             "page_title": r.payload.get("page_title", ""),
             "score": r.score,
         }
-        for r in results
+        for r in kept
     ]
